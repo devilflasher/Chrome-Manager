@@ -177,6 +177,24 @@ class ChromeManager:
             style='Accent.TButton'
         ).pack(side=tk.LEFT, padx=5)
         
+        # 在 button_frame 中添加屏幕选择下拉框
+        screen_frame = ttk.Frame(button_frame)
+        screen_frame.pack(side=tk.LEFT, padx=2)
+        ttk.Label(screen_frame, text="屏幕:").pack(side=tk.LEFT)
+        
+        # 创建屏幕选择下拉框
+        self.screen_var = tk.StringVar()
+        self.screen_combo = ttk.Combobox(
+            screen_frame, 
+            textvariable=self.screen_var,
+            width=8,
+            state="readonly"
+        )
+        self.screen_combo.pack(side=tk.LEFT)
+        
+        # 获取并设置屏幕列表
+        self.update_screen_list()
+        
         list_frame = ttk.Frame(manage_frame)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=2)
         
@@ -869,7 +887,7 @@ class ChromeManager:
             self.root.destroy()
 
     def auto_arrange_windows(self):
-        # 自动排列窗口
+        """自动排列窗口"""
         try:
             # 先停止同步
             was_syncing = self.is_syncing
@@ -891,11 +909,20 @@ class ChromeManager:
                 return
             
             # 按编号正序排序
-            selected.sort(key=lambda x: x[0])  
+            selected.sort(key=lambda x: x[0])
             
-            # 获取屏幕尺寸
-            screen_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
-            screen_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+            # 获取选中的屏幕信息
+            screen_index = self.screen_combo.current()
+            if screen_index < 0 or screen_index >= len(self.screens):
+                messagebox.showerror("错误", "请选择有效的屏幕！")
+                return
+            
+            screen = self.screens[screen_index]
+            screen_rect = screen['work_rect']  # 使用工作区而不是完整显示区
+            
+            # 计算屏幕尺寸
+            screen_width = screen_rect[2] - screen_rect[0]
+            screen_height = screen_rect[3] - screen_rect[1]
             
             # 计算最佳布局
             count = len(selected)
@@ -910,20 +937,30 @@ class ChromeManager:
             
             # 创建位置映射（从左到右，从上到下）
             positions = []
-            # 先创建完整的位置列表
             for i in range(count):
                 row = i // cols
                 col = i % cols
-                x = col * width
-                y = row * height
+                x = screen_rect[0] + col * width
+                y = screen_rect[1] + row * height
                 positions.append((x, y))
             
             # 应用窗口位置
             for i, (_, hwnd, _) in enumerate(selected):
-                x, y = positions[i]
-                # 确保窗口可见并移动到指定位置
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                win32gui.MoveWindow(hwnd, x, y, width, height, True)
+                try:
+                    x, y = positions[i]
+                    # 确保窗口可见并移动到指定位置
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    # 先设置窗口样式确保可以移动
+                    style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+                    style |= win32con.WS_SIZEBOX | win32con.WS_SYSMENU
+                    win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+                    # 移动窗口
+                    win32gui.MoveWindow(hwnd, x, y, width, height, True)
+                    # 强制重绘
+                    win32gui.UpdateWindow(hwnd)
+                except Exception as e:
+                    print(f"移动窗口 {hwnd} 失败: {str(e)}")
+                    continue
             
             # 如果之前在同步，重新开启同步
             if was_syncing:
@@ -1580,6 +1617,135 @@ class ChromeManager:
                     )
                 except:
                     self.current_shortcut = None
+
+    def update_screen_list(self):
+        """更新屏幕列表"""
+        try:
+            screens = []
+            
+            def callback(hmonitor, hdc, lprect, lparam):
+                try:
+                    # 获取显示器信息
+                    monitor_info = win32api.GetMonitorInfo(hmonitor)
+                    screen_name = f"屏幕 {len(screens) + 1}"
+                    if monitor_info['Flags'] & 1:  # MONITORINFOF_PRIMARY
+                        screen_name += " (主屏幕)"
+                    screens.append({
+                        'name': screen_name,
+                        'rect': monitor_info['Monitor'],
+                        'work_rect': monitor_info['Work'],
+                        'monitor': hmonitor
+                    })
+                except Exception as e:
+                    print(f"处理显示器信息失败: {str(e)}")
+                return True
+
+            # 定义回调函数类型
+            MONITORENUMPROC = ctypes.WINFUNCTYPE(
+                ctypes.c_bool,
+                ctypes.c_ulong,
+                ctypes.c_ulong,
+                ctypes.POINTER(wintypes.RECT),
+                ctypes.c_longlong
+            )
+
+            # 创建回调函数
+            callback_function = MONITORENUMPROC(callback)
+
+            # 枚举显示器
+            if ctypes.windll.user32.EnumDisplayMonitors(0, 0, callback_function, 0) == 0:
+                # EnumDisplayMonitors 失败，尝试使用备用方法
+                try:
+                    # 获取虚拟屏幕范围
+                    virtual_width = win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN)
+                    virtual_height = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
+                    virtual_left = win32api.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN)
+                    virtual_top = win32api.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN)
+                    
+                    # 获取主屏幕信息
+                    primary_monitor = win32api.MonitorFromPoint((0, 0), win32con.MONITOR_DEFAULTTOPRIMARY)
+                    primary_info = win32api.GetMonitorInfo(primary_monitor)
+                    
+                    # 添加主屏幕
+                    screens.append({
+                        'name': "屏幕 1 (主屏幕)",
+                        'rect': primary_info['Monitor'],
+                        'work_rect': primary_info['Work'],
+                        'monitor': primary_monitor
+                    })
+                    
+                    # 尝试获取第二个屏幕
+                    try:
+                        second_monitor = win32api.MonitorFromPoint(
+                            (virtual_left + virtual_width - 1, 
+                             virtual_top + virtual_height // 2),
+                            win32con.MONITOR_DEFAULTTONULL
+                        )
+                        if second_monitor and second_monitor != primary_monitor:
+                            second_info = win32api.GetMonitorInfo(second_monitor)
+                            screens.append({
+                                'name': "屏幕 2",
+                                'rect': second_info['Monitor'],
+                                'work_rect': second_info['Work'],
+                                'monitor': second_monitor
+                            })
+                    except:
+                        pass
+                    
+                except Exception as e:
+                    print(f"备用方法失败: {str(e)}")
+            
+            if not screens:
+                # 如果仍然没有找到屏幕，使用基本方案
+                screen_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+                screen_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+                screens.append({
+                    'name': "屏幕 1 (主屏幕)",
+                    'rect': (0, 0, screen_width, screen_height),
+                    'work_rect': (0, 0, screen_width, screen_height),
+                    'monitor': None
+                })
+            
+            # 按照屏幕位置排序（从左到右）
+            screens.sort(key=lambda x: x['rect'][0])
+            
+            # 更新下拉框选项
+            self.screen_combo['values'] = [screen['name'] for screen in screens]
+            self.screens = screens  # 保存屏幕信息
+            
+            # 默认选择主屏幕
+            for i, screen in enumerate(screens):
+                if '主屏幕' in screen['name']:
+                    self.screen_combo.current(i)
+                    break
+            else:
+                self.screen_combo.current(0)
+            
+            # 打印调试信息
+            print("检测到的屏幕:")
+            for screen in screens:
+                print(f"名称: {screen['name']}")
+                print(f"位置: {screen['rect']}")
+                print(f"工作区: {screen['work_rect']}")
+                print("---")
+            
+        except Exception as e:
+            print(f"获取屏幕列表失败: {str(e)}")
+            # 使用最基本的方案
+            try:
+                screen_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+                screen_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+                screens = [{
+                    'name': "主屏幕",
+                    'rect': (0, 0, screen_width, screen_height),
+                    'work_rect': (0, 0, screen_width, screen_height),
+                    'monitor': None
+                }]
+                self.screen_combo['values'] = [screen['name'] for screen in screens]
+                self.screens = screens
+                self.screen_combo.current(0)
+            except Exception as e2:
+                print(f"基本方案也失败了: {str(e2)}")
 
 if __name__ == "__main__":
     app = ChromeManager()
