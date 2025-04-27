@@ -92,6 +92,7 @@ class ChromeManager:
         self.shortcut_to_pid = {}
         # 存储进程ID和窗口编号的映射关系
         self.pid_to_number = {}
+        self.window_list = None
         
         if not is_admin():
             if messagebox.askyesno("权限不足", "需要管理员权限才能运行同步功能。\n是否以管理员身份重新启动程序？"):
@@ -153,7 +154,7 @@ class ChromeManager:
             except Exception as e:
                 print(f"应用窗口位置时出错: {e}")
         
-        self.window_list = None
+        
         self.windows = []
         self.master_window = None
         self.screens = []  # 初始化屏幕列表

@@ -1,0 +1,15 @@
+{
+    "shortcut_path": "",
+    "cache_dir": "",
+    "icon_dir": "",
+    "screen_selection": "",
+    "show_chrome_tip": true,
+    "start_x": "0",
+    "start_y": "0",
+    "window_width": "500",
+    "window_height": "400",
+    "h_spacing": "0",
+    "v_spacing": "0",
+    "windows_per_row": "5",
+    "window_position": "+130+170"
+}
