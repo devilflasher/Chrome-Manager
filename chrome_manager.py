@@ -106,14 +106,28 @@ class ChromeManager:
         # 存储进程ID和窗口编号的映射关系
         self.pid_to_number = {}
 
-        if not is_admin():
-            if messagebox.askyesno(
-                "权限不足",
-                "需要管理员权限才能运行同步功能。\n是否以管理员身份重新启动程序？",
-            ):
-                run_as_admin()
-                sys.exit()
+        # 加载设置
+        self.settings = self.load_settings()
 
+        # 检查是否已确认管理员权限，不再弹窗
+        self.admin_confirmed = self.settings.get("admin_confirmed", False)
+
+        # 检查管理员权限，未确认时才弹窗
+        if not self.admin_confirmed and not is_admin():
+            try:
+                # 只用原有messagebox.askyesno弹窗
+                user_confirmed = messagebox.askyesno(
+                    "权限不足",
+                    "需要管理员权限才能运行同步功能。\n是否以管理员身份重新启动程序？",
+                )
+                if user_confirmed:
+                    # 用户点击"是"，以后不再提示
+                    self.settings["admin_confirmed"] = True
+                    self.save_settings()
+                    run_as_admin()
+                    sys.exit()
+            except Exception as e:
+                print(f"管理员权限弹窗异常: {str(e)}")
         # 确保settings.json文件存在
         if not os.path.exists("settings.json"):
             with open("settings.json", "w", encoding="utf-8") as f:
@@ -3100,26 +3114,31 @@ class ChromeManager:
         try:
             print(f"[{time.time() - self.start_time:.3f}s] 开始执行延迟初始化")
 
-            # 检查管理员权限(延迟检查)
-            if not is_admin():
+            # 检查管理员权限(延迟检查)，已确认则跳过
+            if not self.settings.get("admin_confirmed", False) and not is_admin():
                 print(
                     f"[{time.time() - self.start_time:.3f}s] 检测到非管理员权限，准备提示"
                 )
 
-                # 将管理员权限请求延迟显示，确保主窗口已完全显示
                 def show_admin_prompt():
-                    result = messagebox.askquestion(
-                        "权限提示",
-                        "没有管理员权限可能无法正常访问某些窗口，是否以管理员身份重新启动？",
-                    )
-                    if result == "yes":
-                        run_as_admin()
-                        self.root.destroy()
+                    try:
+                        user_confirmed = messagebox.askyesno(
+                            "权限提示",
+                            "没有管理员权限可能无法正常访问某些窗口，是否以管理员身份重新启动？",
+                        )
+                        if user_confirmed:
+                            self.settings["admin_confirmed"] = True
+                            self.save_settings()
+                            run_as_admin()
+                            self.root.destroy()
+                    except Exception as e:
+                        print(f"管理员权限弹窗异常: {str(e)}")
 
-                # 延迟更长时间显示，避免干扰用户
                 self.root.after(1500, show_admin_prompt)
             else:
-                print(f"[{time.time() - self.start_time:.3f}s] 已是管理员权限")
+                print(
+                    f"[{time.time() - self.start_time:.3f}s] 已是管理员权限或已确认不再询问"
+                )
 
             # 预热窗口枚举 (这个操作可能比较慢)
             print(f"[{time.time() - self.start_time:.3f}s] 开始预热窗口枚举...")
