@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "4.0.0"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "4.0.0",
+			"CompanyName": "Devilflasher",
+			"FileDescription": "Multi-browser environment management and sync tool",
+			"LegalCopyright": "Copyright (c) 2024-2026 Devilflasher",
+			"ProductName": "ChromeManager",
+			"Comments": "ChromeManager desktop application"
+		}
+	}
+}

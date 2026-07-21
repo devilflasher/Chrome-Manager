@@ -1,0 +1,49 @@
+# https://taskfile.dev
+
+version: "3"
+
+tasks:
+  install-deps:
+    internal: true
+    sources:
+      - package.json
+    cmds:
+      - npm install
+
+  test:
+    cmds:
+      - npx vitest run
+
+  update:
+    cmds:
+      - npx npm-check-updates -u
+
+  build:debug:
+    internal: true
+    cmds:
+      - npx esbuild@latest desktop/@wailsio/runtime/src/index.js --inject:desktop/compiled/main.js --format=esm --bundle --tree-shaking=true --sourcemap=inline --outfile=../assetserver/bundledassets/runtime.debug.js --define:DEBUG=true
+
+  build:production:
+    internal: true
+    cmds:
+      - npx esbuild@latest desktop/@wailsio/runtime/src/index.js --inject:desktop/compiled/main.js --format=esm --bundle --tree-shaking=true --minify --outfile=../assetserver/bundledassets/runtime.js --define:DEBUG=false --drop:console
+
+  build:all:
+    internal: true
+    deps:
+      - build:debug
+      - build:production
+
+    cmds:
+      - cmd: echo "Build Complete."
+
+  build:
+    deps:
+      - install-deps
+    cmds:
+      - task: build:all
+
+  generate:events:
+    dir: ../../tasks/events
+    cmds:
+      - go run generate.go

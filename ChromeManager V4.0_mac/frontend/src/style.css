@@ -1,0 +1,2339 @@
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: "Microsoft YaHei", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    background-color: #f5f5f5;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+}
+
+/* 设置窗口样式 */
+.settings-window {
+    margin: 0;
+    padding: 0;
+    font-family: "Microsoft YaHei", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    background-color: #f5f5f5;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+}
+
+/* Main container */
+.browser-extension-dashboard {
+    width: 100vw;
+    height: 100vh;
+    background-color: white;
+    border: none;
+    border-radius: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+}
+
+/* Header - 使用Wails拖动属性 */
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background-color: #f3f4f6;
+    border-bottom: 1px solid #d1d5db;
+    height: 36px;
+    --wails-draggable: drag;
+    user-select: none;
+    cursor: default;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    --wails-draggable: drag;
+    cursor: default;
+    flex: 1;
+}
+
+.app-icon {
+    width: 18px;
+    height: 18px;
+    background-color: transparent;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    --wails-draggable: drag;
+    cursor: default;
+}
+
+.icon-grid {
+    width: 12px;
+    height: 12px;
+    color: white;
+    pointer-events: none;
+}
+
+.icon-img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    pointer-events: none;
+}
+
+.app-title {
+    font-size: 15px;
+    font-weight: 500;
+    color: black;
+    --wails-draggable: drag;
+    cursor: default;
+    flex: 1;
+}
+
+.window-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    --wails-draggable: no-drag;
+}
+
+.window-control-btn {
+    width: 22px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    --wails-draggable: no-drag;
+}
+
+.window-control-btn:hover {
+    background-color: #e5e7eb;
+}
+
+.window-control-btn:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.window-control-btn .icon {
+    width: 14px;
+    height: 14px;
+    color: #374151;
+}
+
+/* Main Content */
+.main-content {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.left-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* Toolbar */
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 8px 4px 8px;
+    background-color: white;
+}
+
+.toolbar-btn {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 13px;
+    border: 1px solid;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    /* Increased to 500 for consistency */
+}
+
+.toolbar-btn:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.toolbar-btn.primary {
+    background-color: black;
+    color: white;
+    border-color: black;
+}
+
+.toolbar-btn.primary:hover {
+    background-color: #1f2937;
+}
+
+.toolbar-btn.secondary {
+    background-color: white;
+    color: black;
+    border-color: #9ca3af;
+}
+
+.toolbar-btn.secondary:hover {
+    background-color: #f3f4f6;
+}
+
+/* Custom Button Styles */
+.button {
+    display: inline-block;
+    border-radius: 7px;
+    border: none;
+    background: black;
+    color: white;
+    font-family: inherit;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 500;
+    /* Added 500 for consistency */
+    height: 30px;
+    width: 8em;
+    padding: 0 1em;
+    transition: all 0.4s;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.button span {
+    cursor: pointer;
+    display: inline-block;
+    position: relative;
+    transition: 0.4s;
+}
+
+.button span:after {
+    content: 'Go';
+    position: absolute;
+    opacity: 0;
+    top: 0;
+    right: -20px;
+    transition: 0.7s;
+}
+
+.button:hover {
+    background: #1f2937;
+}
+
+.button:hover span {
+    padding-right: 1.55em;
+}
+
+.button:hover span:after {
+    opacity: 4;
+    right: 0;
+}
+
+/* Window List Container */
+.window-list-container {
+    flex: 1;
+    padding: 4px 8px 12px 8px;
+    min-height: 0;
+}
+
+.window-list-panel {
+    height: 100%;
+    background-color: white;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-header {
+    padding: 10px 12px;
+    background-color: #f3f4f6;
+}
+
+.panel-header h3 {
+    font-size: 15px;
+    font-weight: 500;
+    color: black;
+}
+
+/* Table */
+.table-header {
+    display: grid;
+    grid-template-columns: 2fr auto 2fr auto 6fr auto 2fr;
+    gap: 8px;
+    padding: 6px 10px;
+    background-color: #e7e7e7;
+    font-size: 14px;
+    font-weight: 500;
+    color: black;
+    align-items: center;
+}
+
+.table-header>div {
+    display: flex;
+    align-items: center;
+}
+
+.table-header .col-select {
+    justify-content: center;
+}
+
+.table-header .col-number {
+    justify-content: center;
+}
+
+.table-header .col-title {
+    justify-content: flex-start;
+}
+
+.table-header .col-master {
+    justify-content: center;
+    text-align: center;
+    margin-right: 12px;
+}
+
+.col-separator {
+    color: #9ca3af;
+    font-weight: normal;
+    justify-content: center;
+    user-select: none;
+    width: auto;
+    min-width: auto;
+}
+
+.table-content {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.window-row {
+    display: grid;
+    grid-template-columns: 2fr auto 2fr auto 6fr auto 2fr;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid #f3f4f6;
+    min-height: 36px;
+}
+
+.window-row .col-select {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.window-row .col-number {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.window-row .col-title {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    color: #374151;
+}
+
+.window-row .col-master {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    margin-right: 12px;
+}
+
+/* 新增：窗口详细信息样式 */
+.window-number {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+    line-height: 1.2;
+}
+
+.window-status {
+    font-size: 12px;
+    margin-top: 2px;
+    line-height: 1;
+}
+
+.window-title {
+    font-size: 13px;
+    color: #374151;
+    line-height: 1.3;
+    margin-bottom: 2px;
+    font-weight: 500;
+}
+
+.window-details {
+    font-size: 11px;
+    color: #6b7280;
+    line-height: 1.2;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.window-row:hover {
+    background-color: #f9fafb;
+}
+
+.col-select input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: black;
+}
+
+.master-radio {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: black;
+    appearance: none;
+    border: 2px solid #9ca3af;
+    border-radius: 50%;
+    background-color: white;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.master-radio:checked {
+    border-color: black;
+    background-color: white;
+}
+
+.master-radio:checked::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: black;
+}
+
+.master-radio:hover {
+    border-color: #374151;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+}
+
+.master-radio:focus {
+    outline: none;
+    border-color: black;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Right Sidebar - 自定义排列区域 */
+.right-sidebar {
+    width: 180px;
+    background-color: white;
+    border-left: 1px solid #d1d5db;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 侧边栏面板容器 */
+.sidebar-panel {
+    padding: 8px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* 面板标题区域 */
+.sidebar-panel .panel-header {
+    padding: 5px 0;
+    margin: 0;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+    background-color: transparent;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.sidebar-panel .panel-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+    margin: 0;
+    text-align: center;
+}
+
+/* 配置表单容器 */
+.config-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    padding-top: 12px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* 表单行布局 */
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    align-items: start;
+}
+
+/* 表单组 */
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+/* 全宽表单组 */
+.form-group.full-width {
+    grid-column: 1 / -1;
+}
+
+/* 内联表单行（水平间距、垂直间距等） */
+.form-row-inline {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    align-items: end;
+}
+
+/* 表单标签 */
+.form-group label {
+    font-size: 12px;
+    color: #374151;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 输入框样式 */
+.form-input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 12px;
+    background-color: white;
+    box-sizing: border-box;
+}
+
+.form-input:focus {
+    outline: none !important;
+    border-color: #000000 !important;
+    /* Thin Black Border */
+    box-shadow: none !important;
+    /* Removed Blue Shadow */
+}
+
+.form-input.drag-over {
+    border: 2px dashed #2563eb !important;
+    background-color: #f0f9ff !important;
+    color: #1e40af;
+}
+
+/* 内联按钮（获取、设定等小按钮） */
+/* 内联按钮（获取、设定等小按钮） */
+.form-inline-btn {
+    width: 100%;
+    height: 30px;
+    padding: 0 6px;
+    font-size: 13px;
+    /* Standardized to 13px (was 11px) */
+    background-color: #000000 !important;
+    /* Default Black to match Control Btn */
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+
+.form-inline-btn:hover {
+    background-color: #1f2937 !important;
+    /* Hover Dark Gray to match Control Btn */
+}
+
+.form-inline-btn:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* 提交按钮（自定义排列） */
+.form-submit-btn {
+    width: 100%;
+    height: 36px;
+    font-size: 13px;
+    background-color: #000000 !important;
+    /* Default Black Force */
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-sizing: border-box;
+}
+
+.form-submit-btn:hover {
+    background-color: #374151 !important;
+    /* Hover Dark Slate Force */
+}
+
+.form-submit-btn:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* Bottom Tabs - 滑动标签页样式 */
+.bottom-tabs {
+    background-color: white;
+    border-top: 1px solid #d1d5db;
+}
+
+.tabs-container {
+    width: 100%;
+    padding: 8px;
+}
+
+/* 兼容性标签页样式 */
+.radio-input input {
+    display: none;
+}
+
+.radio-input {
+    position: relative;
+    display: flex;
+    align-items: center;
+    border-radius: 10px;
+    background-color: #fff;
+    color: #000000;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid rgba(53, 52, 52, 0.226);
+}
+
+.radio-input label {
+    flex: 1;
+    padding: 6px;
+    /* 增加内边距让标签页按钮更高 */
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2;
+    font-weight: 500;
+    /* Reduced from 600 to 500 */
+    letter-spacing: normal;
+    /* Removed -1px letter-spacing */
+    font-size: 13px;
+    /* Reduced from 14px to 13px */
+    transition: color 0.15s ease;
+    position: relative;
+}
+
+.selection {
+    position: absolute;
+    height: 100%;
+    width: 0;
+    z-index: 1;
+    left: 0;
+    top: 0;
+    transition: left 0.15s ease, width 0.15s ease;
+    background-color: #000000;
+    border-radius: 8px;
+    display: block;
+}
+
+.radio-input label.active {
+    color: #fff;
+}
+
+.tab-content {
+    background-color: white;
+}
+
+.tab-pane {
+    display: none;
+    padding: 16px 20px;
+    min-height: 52px;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+.tab-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.cache-clean-tab-controls {
+    gap: 12px;
+}
+
+.cache-clean-help-icon {
+    width: 24px;
+    height: 24px;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    background: #f9fafb;
+    color: #4b5563;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: help;
+    padding: 0;
+}
+
+.cache-clean-help-icon:hover {
+    background: #f3f4f6;
+    color: #111827;
+    border-color: #9ca3af;
+}
+
+.cache-clean-help-icon:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.08);
+    border-color: #6b7280;
+}
+
+.automation-tab-controls {
+    gap: 12px;
+}
+
+.automation-tab-description {
+    font-size: 13px;
+    color: #6b7280;
+    line-height: 1.5;
+}
+
+.control-label {
+    font-size: 14px;
+    color: black;
+}
+
+.range-input {
+    width: 80px;
+    height: 32px;
+    font-size: 13px;
+    border: 1px solid #9ca3af;
+    border-radius: 4px;
+    padding: 0 8px;
+}
+
+.range-input:focus {
+    outline: none !important;
+    border-color: #000000 !important;
+    box-shadow: none !important;
+}
+
+.control-btn {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 13px;
+    background-color: black;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.control-btn:hover {
+    background-color: #1f2937;
+}
+
+.control-btn:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* 下拉菜单样式 */
+select.range-input {
+    height: 32px;
+    font-size: 13px;
+    border: 1px solid #9ca3af;
+    border-radius: 4px;
+    padding: 0 8px;
+    background-color: white;
+    cursor: pointer;
+}
+
+select.range-input:focus {
+    outline: none !important;
+    border-color: #000000 !important;
+    box-shadow: none !important;
+}
+
+/* 标签页控件间距优化 */
+.tab-controls .control-btn+.control-btn {
+    margin-left: 0;
+}
+
+.tab-controls .range-input+.control-btn {
+    margin-left: 0;
+}
+
+.tab-controls .control-btn+.range-input {
+    margin-left: 0;
+}
+
+/* 为较长的控件组提供更好的布局 */
+.tab-controls.batch-open {
+    gap: 6px;
+}
+
+.tab-controls.batch-open .range-input {
+    min-width: 100px;
+}
+
+.help-text {
+    font-size: 13px;
+    color: #6b7280;
+    white-space: nowrap;
+}
+
+.tab-placeholder {
+    font-size: 14px;
+    color: #6b7280;
+}
+
+/* Footer */
+.footer {
+    padding: 4px 8px;
+    background-color: #f3f4f6;
+    border-top: 1px solid #d1d5db;
+    flex-shrink: 0;
+}
+
+.footer-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.footer-left,
+.footer-right {
+    font-size: 12px;
+}
+
+.footer-link {
+    color: black !important;
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.footer-link:hover {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+/* 设置页面样式调整 */
+.settings-app {
+    width: 100%;
+    height: calc(100vh - 36px);
+    background-color: white;
+    padding: 20px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+.settings-content {
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+/* 设置区块 */
+.settings-section {
+    background: white;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    padding: 20px;
+}
+
+.section-title {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #24292e;
+    border-bottom: 1px solid #e1e4e8;
+    padding-bottom: 8px;
+}
+
+/* 设置项 */
+.setting-item {
+    margin-bottom: 16px;
+}
+
+.setting-item:last-child {
+    margin-bottom: 0;
+}
+
+.setting-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #24292e;
+    margin-bottom: 6px;
+}
+
+.setting-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 提示文本样式 */
+.setting-hint {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 4px;
+    line-height: 1.4;
+}
+
+/* 拖拽提示已移除 - 用户体验优化 */
+
+/* 输入框样式 */
+.setting-input {
+    flex: 0 0 auto;
+    max-width: 50%;
+    width: 250px;
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    background-color: white;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.setting-input:focus {
+    outline: none !important;
+    border-color: #3b82f6;
+    /* Keep blue for Settings Modal? No, user said "Interface text box". I should probably change this too but user's screenshot was Main UI. Let's make it consistent.*/
+    border-color: #000000 !important;
+    box-shadow: none !important;
+    /* box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); */
+}
+
+/* 拖拽样式已移除 */
+
+.setting-input::after {
+    content: '';
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'%3E%3C/path%3E%3Cpolyline points='7,10 12,15 17,10'%3E%3C/polyline%3E%3Cline x1='12' y1='15' x2='12' y2='3'%3E%3C/line%3E%3C/svg%3E");
+    background-size: contain;
+    background-repeat: no-repeat;
+    pointer-events: none;
+    opacity: 0.3;
+}
+
+.setting-input:focus::after {
+    opacity: 0.6;
+}
+
+/* 拖拽图标样式已移除 */
+
+/* 选择框样式 */
+.setting-select {
+    flex: 0 0 auto;
+    max-width: 50%;
+    width: 250px;
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    background-color: white;
+}
+
+.setting-select:focus {
+    outline: none !important;
+    border-color: #000000 !important;
+    box-shadow: none !important;
+}
+
+/* 滑块样式 */
+.setting-slider {
+    flex: 1;
+    margin-right: 12px;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    background: #d1d5db;
+    border-radius: 3px;
+    outline: none;
+}
+
+.setting-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: #000000;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.setting-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: #000000;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.setting-slider::-webkit-slider-track {
+    height: 6px;
+    background: #d1d5db;
+    border-radius: 3px;
+}
+
+.setting-slider::-moz-range-track {
+    height: 6px;
+    background: #d1d5db;
+    border-radius: 3px;
+    border: none;
+}
+
+.speed-value {
+    font-size: 13px;
+    color: #586069;
+    min-width: 60px;
+    text-align: right;
+    font-weight: 500;
+}
+
+/* 复选框样式 */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    color: #24292e;
+    cursor: pointer;
+    user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+    margin-right: 8px;
+    width: 16px;
+    height: 16px;
+}
+
+/* 按钮样式 */
+.setting-btn {
+    padding: 6px 12px;
+    border: 1px solid #000000;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background-color: #000000;
+    color: #ffffff;
+    white-space: nowrap;
+    max-width: 120px;
+    width: auto;
+    min-width: 80px;
+}
+
+.setting-btn:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.setting-btn:hover {
+    background-color: #1f2937;
+    border-color: #1f2937;
+}
+
+.setting-btn.primary {
+    background-color: #000000;
+    color: white;
+    border-color: #000000;
+}
+
+.setting-btn.primary:hover {
+    background-color: #1f2937;
+    border-color: #1f2937;
+}
+
+.setting-btn.secondary {
+    background-color: #000000;
+    color: #ffffff;
+    border-color: #000000;
+}
+
+.setting-btn.secondary:hover {
+    background-color: #1f2937;
+    border-color: #1f2937;
+}
+
+.setting-btn.gray {
+    background-color: #6b7280;
+    color: #ffffff;
+    border-color: #6b7280;
+}
+
+.setting-btn.gray:hover {
+    background-color: #4b5563;
+    border-color: #4b5563;
+}
+
+.browse-btn {
+    padding: 6px 12px;
+    border: 1px solid #000000;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    background-color: #000000;
+    color: #ffffff;
+    white-space: nowrap;
+    width: 60px;
+    min-width: 60px;
+    max-width: 60px;
+    flex-shrink: 0;
+}
+
+.browse-btn:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.browse-btn:hover {
+    background-color: #1f2937;
+    border-color: #1f2937;
+}
+
+/* 图标按钮组样式 */
+.icon-buttons {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+}
+
+.icon-buttons .setting-btn {
+    flex: 1;
+    min-width: 180px !important;
+    max-width: 220px !important;
+    width: auto;
+}
+
+/* 一行布局的设置控件 */
+.setting-control-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
+.setting-control-inline .setting-input,
+.setting-control-inline .setting-select {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+}
+
+.setting-control-inline .browse-btn,
+.setting-control-inline .setting-btn {
+    flex-shrink: 0;
+    width: auto;
+}
+
+/* 系统维护按钮组 */
+.system-maintenance-buttons {
+    display: flex;
+    gap: 12px;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+}
+
+.system-maintenance-buttons .setting-btn {
+    flex: none;
+    min-width: 180px;
+    max-width: 200px;
+    width: auto;
+}
+
+/* 重置关闭行为按钮加宽 */
+.reset-behavior-btn {
+    min-width: 140px !important;
+    max-width: 160px !important;
+}
+
+/* 操作按钮区域 */
+.settings-actions {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid #e1e4e8;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+/* 响应式设计 */
+@media (max-width: 640px) {
+    .settings-app {
+        padding: 16px;
+    }
+
+    .setting-control {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    /* 强制保持按钮组在一行，即使在小屏幕上 */
+    .icon-buttons {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+    }
+
+    .icon-buttons .setting-btn {
+        min-width: 120px;
+        max-width: 150px;
+        font-size: 12px;
+    }
+
+    .system-maintenance-buttons {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+    }
+
+    .system-maintenance-buttons .setting-btn {
+        min-width: 80px;
+        max-width: 100px;
+        font-size: 11px;
+    }
+
+    .settings-actions {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        justify-content: space-between;
+    }
+
+    .settings-actions .setting-btn {
+        min-width: 70px;
+        max-width: 90px;
+        font-size: 11px;
+    }
+}
+
+
+
+/* ===========================================
+   响应式设计 (Responsive Design)
+   =========================================== */
+
+@media (max-width: 768px) {
+    .settings-content {
+        padding: 16px;
+    }
+
+    .settings-section {
+        padding: 16px;
+    }
+
+    .setting-control-inline {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .button-group {
+        flex-direction: column;
+    }
+
+    .browse-btn,
+    .setting-btn {
+        justify-content: center;
+    }
+}
+
+/* 行为状态显示 */
+.behavior-status {
+    flex: 1;
+    padding: 6px 8px;
+    background-color: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #374151;
+    min-width: 200px;
+}
+
+/* ===========================================
+   设置模态框样式 (Settings Modal Styles)
+   =========================================== */
+
+.settings-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(2px);
+}
+
+.settings-modal {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+    width: 95vw;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.settings-modal .settings-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background-color: #f3f4f6;
+    border-bottom: 1px solid #d1d5db;
+    cursor: default;
+}
+
+.settings-modal .titlebar-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.settings-modal .settings-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+    margin: 0;
+}
+
+.modal-close-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background-color: transparent;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 18px;
+    color: #6b7280;
+    transition: all 0.2s ease;
+}
+
+.modal-close-btn:hover {
+    background-color: #e5e7eb;
+    color: #374151;
+}
+
+.settings-modal .settings-content {
+    overflow-y: auto;
+    padding: 16px 8px;
+    flex: 1;
+    min-height: 0;
+    max-width: 95% !important;
+    width: 95% !important;
+    margin: 0 auto;
+}
+
+.settings-modal .settings-section {
+    margin-bottom: 20px;
+    padding: 0;
+    border: none;
+    background: none;
+    width: 100% !important;
+}
+
+.settings-modal .settings-section:last-of-type {
+    margin-bottom: 0;
+}
+
+.settings-modal .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 12px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.settings-modal .setting-item {
+    margin-bottom: 16px;
+}
+
+.settings-modal .setting-item:last-child {
+    margin-bottom: 0;
+}
+
+.settings-modal .setting-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 6px;
+}
+
+.settings-modal .setting-control {
+    margin-bottom: 4px;
+}
+
+.settings-modal .setting-hint {
+    font-size: 11px;
+    color: #6b7280;
+    line-height: 1.4;
+    margin-top: 4px;
+}
+
+.settings-modal .setting-input,
+.settings-modal .setting-select {
+    width: 100%;
+    padding: 6px 10px;
+    /* Slighting padding adjustment */
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    height: 32px;
+    /* Fixed height for alignment */
+    transition: border-color 0.2s ease;
+}
+
+.settings-modal .setting-input:focus,
+.settings-modal .setting-select:focus {
+    outline: none;
+    border-color: #000000;
+    /* Thin Black Border */
+    box-shadow: none;
+}
+
+.settings-modal .setting-slider {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background-color: #e5e7eb;
+    outline: none;
+    appearance: none;
+    margin-right: 8px;
+}
+
+.settings-modal .setting-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: #000000;
+    cursor: pointer;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.settings-modal .setting-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: #000000;
+    cursor: pointer;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.settings-modal .speed-value {
+    font-size: 13px;
+    color: #374151;
+    font-weight: 500;
+    margin-left: 8px;
+}
+
+.settings-modal .checkbox-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-size: 13px;
+    color: #374151;
+    user-select: none;
+}
+
+.settings-modal .checkbox-label input[type="checkbox"] {
+    margin-right: 8px;
+    width: 14px;
+    height: 14px;
+}
+
+.settings-modal .setting-btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-right: 8px;
+    max-width: none;
+}
+
+.settings-modal .setting-btn:last-child {
+    margin-right: 0;
+}
+
+/* Remove hover shadow for simplicity */
+.settings-modal .setting-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: none;
+}
+
+.settings-modal .setting-btn.primary {
+    background-color: #000000;
+    color: white;
+    border-color: #000000;
+}
+
+.settings-modal .setting-btn.primary:hover {
+    background-color: #1f2937;
+    border-color: #1f2937;
+}
+
+.settings-modal .setting-btn.secondary {
+    background-color: white;
+    color: #374151;
+    border-color: #d1d5db;
+}
+
+.settings-modal .setting-btn.secondary:hover {
+    background-color: #f9fafb;
+    border-color: #9ca3af;
+}
+
+.settings-modal .setting-btn.gray {
+    background-color: #f3f4f6;
+    color: #6b7280;
+    border-color: #d1d5db;
+}
+
+.settings-modal .setting-btn.gray:hover {
+    background-color: #e5e7eb;
+    color: #374151;
+}
+
+.settings-modal .browse-btn {
+    padding: 8px 12px;
+    background-color: #f3f4f6;
+    color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    margin-left: 8px;
+    min-width: 80px;
+    /* Fixed width for right-side alignment */
+    text-align: center;
+}
+
+.settings-modal .browse-btn:hover {
+    background-color: #e5e7eb;
+    border-color: #9ca3af;
+}
+
+.settings-modal .setting-control-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    flex-wrap: nowrap;
+}
+
+.settings-modal .setting-control-inline .setting-input,
+.settings-modal .setting-control-inline .setting-select {
+    flex: 1;
+    margin: 0;
+    width: 100% !important;
+    max-width: none !important;
+}
+
+.settings-modal .icon-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+}
+
+.settings-modal .icon-buttons .setting-btn {
+    margin: 0;
+    flex-shrink: 0;
+    min-width: auto;
+    white-space: nowrap;
+    text-align: center;
+}
+
+.settings-modal .system-maintenance-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+}
+
+.settings-modal .system-maintenance-buttons .setting-btn {
+    margin: 0;
+    flex-shrink: 0;
+    min-width: auto;
+    white-space: nowrap;
+    text-align: center;
+}
+
+.settings-modal .settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e7eb;
+    margin-top: 20px;
+}
+
+.settings-modal .settings-actions .setting-btn {
+    margin: 0;
+    min-width: 80px;
+}
+
+/* 新增：通用水平布局类 */
+.settings-modal .setting-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: nowrap;
+}
+
+.settings-modal .setting-row .setting-label {
+    margin-bottom: 0;
+    min-width: 120px;
+    /* Fixed width for perfect alignment */
+    width: 120px;
+    flex-shrink: 0;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+}
+
+.settings-modal .setting-row .setting-control {
+    flex: 1;
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-modal .setting-row .setting-input,
+.settings-modal .setting-row .setting-select {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-modal .setting-row .browse-btn,
+.settings-modal .setting-row .setting-btn {
+    flex-shrink: 0;
+    margin-left: 0;
+}
+
+/* 双列布局 */
+.settings-modal .setting-row-double {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.settings-modal .setting-row-double .setting-item {
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-modal .setting-row-double .setting-label {
+    margin-bottom: 0;
+    min-width: 80px;
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+}
+
+.settings-modal .setting-row-double .setting-input,
+.settings-modal .setting-row-double .setting-select {
+    flex: 1;
+    min-width: 0;
+}
+
+/* 滑块特殊样式 */
+.settings-modal .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.settings-modal .slider-row .setting-label {
+    margin-bottom: 0;
+    min-width: 120px;
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+}
+
+.settings-modal .slider-row .setting-control {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0;
+}
+
+.settings-modal .slider-row .setting-slider {
+    flex: 1;
+    margin-right: 0;
+}
+
+.settings-modal .slider-row .speed-value {
+    min-width: 60px;
+    text-align: right;
+    margin-left: 0;
+}
+
+/* 复选框行布局 */
+.settings-modal .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.settings-modal .checkbox-row .checkbox-label {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+/* 左对齐按钮组布局 */
+.settings-modal .button-row-left {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+}
+
+.settings-modal .button-row-left .setting-btn {
+    margin: 0;
+    white-space: nowrap;
+    text-align: center;
+    min-width: auto;
+    flex-shrink: 0;
+}
+
+.settings-modal .permission-action-btn {
+    min-width: 170px;
+    white-space: nowrap;
+}
+
+/* 模态框响应式设计 */
+@media (max-width: 640px) {
+    .settings-modal {
+        width: 98vw;
+        max-height: 95vh;
+    }
+
+    .settings-modal .settings-content {
+        padding: 12px 6px;
+    }
+
+    /* 小屏幕上保持水平布局 */
+    .settings-modal .setting-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+
+    .settings-modal .setting-row .setting-label {
+        min-width: auto;
+        text-align: left;
+    }
+
+    .settings-modal .setting-row .setting-control {
+        flex-direction: row;
+        gap: 8px;
+    }
+
+    .settings-modal .setting-row-double {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .settings-modal .slider-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+
+    .settings-modal .button-row-left {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .settings-modal .button-row-left .setting-btn {
+        min-width: 100%;
+    }
+
+    .settings-modal .setting-control-inline {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .settings-modal .setting-control-inline .browse-btn {
+        margin-left: 0;
+        margin-top: 8px;
+    }
+
+    .settings-modal .icon-buttons,
+    .settings-modal .system-maintenance-buttons {
+        flex-direction: column;
+    }
+
+    .settings-modal .icon-buttons .setting-btn,
+    .settings-modal .system-maintenance-buttons .setting-btn {
+        min-width: 100%;
+    }
+
+    .settings-modal .settings-actions {
+        flex-direction: column;
+    }
+
+    .settings-modal .settings-actions .setting-btn {
+        min-width: 100%;
+    }
+}
+
+/* Custom URL List Styles */
+.settings-modal .urls-list {
+    max-height: 250px;
+    overflow-y: auto;
+    margin-top: 8px;
+    border: 1px solid #d1d5db;
+    /* Standard border color */
+    border-radius: 4px;
+    background-color: #ffffff;
+}
+
+.settings-modal .url-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #ffffff;
+    border-bottom: 1px solid #f3f4f6;
+    margin-bottom: 0;
+}
+
+.settings-modal .url-item:last-child {
+    border-bottom: none;
+}
+
+.settings-modal .url-item:hover {
+    background: #f9fafb;
+}
+
+.settings-modal .url-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-modal .url-item-name {
+    font-weight: 500;
+    color: #111827;
+    margin-bottom: 2px;
+    font-size: 13px;
+}
+
+.settings-modal .url-item-value {
+    font-size: 11px;
+    color: #6b7280;
+    word-break: break-all;
+    line-height: 1.3;
+}
+
+/* Custom Checkbox and Radio Styles */
+.settings-modal input[type="checkbox"],
+.settings-modal input[type="radio"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 1px solid #d1d5db;
+    background-color: #fff;
+    cursor: pointer;
+    vertical-align: middle;
+    margin-right: 8px;
+    position: relative;
+    border-radius: 4px;
+    /* Default for checkbox */
+    transition: all 0.2s ease;
+}
+
+/* Radio specific border radius */
+.settings-modal input[type="radio"] {
+    border-radius: 50%;
+}
+
+/* Checkbox Checked State */
+.settings-modal input[type="checkbox"]:checked {
+    background-color: #000000;
+    border-color: #000000;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
+    background-size: 10px;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+/* Radio Checked State */
+.settings-modal input[type="radio"]:checked {
+    background-color: #000000;
+    border-color: #000000;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Ccircle cx='12' cy='12' r='6'/%3E%3C/svg%3E");
+    background-size: 10px;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+/* Hover States */
+.settings-modal input[type="checkbox"]:hover,
+.settings-modal input[type="radio"]:hover {
+    border-color: #9ca3af;
+}
+
+.settings-modal input[type="checkbox"]:checked:hover,
+.settings-modal input[type="radio"]:checked:hover {
+    background-color: #374151;
+    border-color: #374151;
+}
+
+/* Focus States */
+.settings-modal input[type="checkbox"]:focus,
+.settings-modal input[type="radio"]:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    border-color: #000000;
+}
+
+.browser-cache-modal {
+    max-width: 820px;
+}
+
+.cache-clean-intro {
+    font-size: 13px;
+    line-height: 1.7;
+    color: #4b5563;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 12px 14px;
+}
+
+.cache-clean-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.cache-clean-toolbar-note {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.6;
+}
+
+.cache-clean-status {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #374151;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.cache-clean-status.success {
+    color: #166534;
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+}
+
+.cache-clean-status.warning {
+    color: #92400e;
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+.cache-clean-status.danger {
+    color: #991b1b;
+    background: #fef2f2;
+    border-color: #fecaca;
+}
+
+.cache-clean-targets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.cache-clean-target-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: #374151;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 999px;
+}
+
+.cache-clean-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.cache-clean-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cache-clean-card-label {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.cache-clean-card strong {
+    font-size: 18px;
+    color: #111827;
+}
+
+.cache-clean-results {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cache-clean-item {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 14px;
+}
+
+.cache-clean-item-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.cache-clean-item-main {
+    min-width: 0;
+    flex: 1;
+}
+
+.cache-clean-item-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+    margin-bottom: 4px;
+}
+
+.cache-clean-item-path {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.5;
+    word-break: break-all;
+}
+
+.cache-clean-item-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.cache-clean-item-size {
+    font-size: 16px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.cache-clean-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid #d1d5db;
+    color: #4b5563;
+    background: #f9fafb;
+}
+
+.cache-clean-tag.ready {
+    color: #166534;
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+}
+
+.cache-clean-tag.warning {
+    color: #92400e;
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+.cache-clean-tag.danger {
+    color: #991b1b;
+    background: #fef2f2;
+    border-color: #fecaca;
+}
+
+.cache-clean-tag.success {
+    color: #166534;
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+}
+
+.cache-clean-breakdown {
+    margin-top: 12px;
+    border-top: 1px solid #f0f0f0;
+    padding-top: 10px;
+}
+
+.cache-clean-breakdown summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: #374151;
+    user-select: none;
+}
+
+.cache-clean-breakdown-list {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cache-clean-breakdown-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: #4b5563;
+}
+
+.cache-clean-breakdown-row strong {
+    color: #111827;
+    flex-shrink: 0;
+}
+
+.cache-clean-empty,
+.cache-clean-empty-inline {
+    border: 1px dashed #d1d5db;
+    border-radius: 10px;
+    background: #f9fafb;
+    color: #6b7280;
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 14px;
+}
+
+.cache-clean-empty-inline {
+    margin-top: 12px;
+    padding: 10px 12px;
+}
+
+.automation-modal {
+    max-width: 760px;
+}
+
+.automation-intro {
+    font-size: 13px;
+    line-height: 1.8;
+    color: #4b5563;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 12px 14px;
+}
+
+.automation-repo-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 14px;
+}
+
+.automation-repo-url {
+    font-family: Consolas, Monaco, monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #111827;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 10px 12px;
+    word-break: break-all;
+}
+
+.automation-repo-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.automation-step-list,
+.automation-note-list,
+.automation-example-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.automation-step-item,
+.automation-note-item,
+.automation-example-item {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 12px 14px;
+}
+
+.automation-step-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.automation-step-item strong {
+    font-size: 14px;
+    color: #111827;
+}
+
+.automation-step-item span,
+.automation-note-item {
+    font-size: 13px;
+    line-height: 1.7;
+    color: #4b5563;
+}
+
+.automation-example-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.automation-example-text {
+    flex: 1;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #111827;
+    word-break: break-word;
+}
+
+.automation-copy-btn {
+    flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+    .cache-clean-item-header {
+        flex-direction: column;
+    }
+
+    .cache-clean-item-side {
+        align-items: flex-start;
+    }
+
+    .automation-example-item {
+        flex-direction: column;
+    }
+}

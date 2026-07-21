@@ -1,0 +1,30 @@
+# System files
+.DS_Store
+Thumbs.db
+
+# Local agent metadata
+/.codex/
+/.agents/
+
+# Build caches and generated output
+ChromeManager V4.0_win/.build-cache/
+ChromeManager V4.0_win/.gocache/
+ChromeManager V4.0_win/.task/
+ChromeManager V4.0_win/bin/
+ChromeManager V4.0_win/frontend/node_modules/
+ChromeManager V4.0_win/frontend/dist/*
+!ChromeManager V4.0_win/frontend/dist/.gitkeep
+ChromeManager V4.0_win/settings.json
+
+ChromeManager V4.0_mac/.build-cache/
+ChromeManager V4.0_mac/.gocache/
+ChromeManager V4.0_mac/.task/
+ChromeManager V4.0_mac/bin/
+ChromeManager V4.0_mac/build-tool
+ChromeManager V4.0_mac/frontend/node_modules/
+ChromeManager V4.0_mac/frontend/dist/*
+!ChromeManager V4.0_mac/frontend/dist/.gitkeep
+
+*.syso
+*/build/linux/appimage/build/
+*/build/windows/nsis/MicrosoftEdgeWebview2Setup.exe

@@ -1,0 +1,115 @@
+version: '3'
+
+tasks:
+  go:mod:tidy:
+    summary: Runs `go mod tidy`
+    internal: true
+    cmds:
+      - go mod tidy
+
+  install:frontend:deps:
+    summary: Install frontend dependencies
+    dir: frontend
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/*
+    preconditions:
+      - sh: npm version
+        msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
+    cmds:
+      - npm install
+
+  build:frontend:
+    summary: Build the frontend project
+    dir: frontend
+    sources:
+      - "**/*"
+    generates:
+      - dist/*
+    deps:
+      - task: install:frontend:deps
+      - task: generate:bindings
+    cmds:
+      - npm run {{.BUILD_COMMAND}} -q
+    env:
+      PRODUCTION: '{{.PRODUCTION | default "false"}}'
+    vars:
+      BUILD_COMMAND: '{{if eq .PRODUCTION "true"}}build{{else}}build:dev{{end}}'
+
+
+  generate:bindings:
+    summary: Generates bindings for the frontend
+    deps:
+      - task: go:mod:tidy
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "frontend/bindings/**/*"
+    cmds:
+      - |
+        if [ '{{.PRODUCTION | default "false"}}' = "true" ] && [ -d frontend/bindings ]; then
+          echo "PRODUCTION=true and frontend/bindings exists; using existing bindings"
+          exit 0
+        fi
+
+        WAILS3_BIN="$(command -v wails3 || true)"
+        if [ -z "$WAILS3_BIN" ] && command -v go >/dev/null 2>&1; then
+          GOPATH_BIN="$(go env GOPATH)/bin/wails3"
+          if [ -x "$GOPATH_BIN" ]; then
+            WAILS3_BIN="$GOPATH_BIN"
+          fi
+        fi
+
+        if [ -n "$WAILS3_BIN" ]; then
+          "$WAILS3_BIN" generate bindings -f '{{.BUILD_FLAGS}}' -clean=true
+        elif [ -d frontend/bindings ]; then
+          echo "wails3 not found; using existing frontend/bindings"
+        else
+          echo "wails3 not found and frontend/bindings is missing" >&2
+          exit 127
+        fi
+
+  generate:icons:
+    summary: Generates Mac `.icns` files from an image
+    dir: build
+    sources:
+      - "appicon.png"
+    generates:
+      - "darwin/icons.icns"
+    cmds:
+      - |
+        if [ -f darwin/icons.icns ]; then
+          echo "darwin/icons.icns already exists; skipping icon generation"
+          exit 0
+        fi
+        ICONSET="$(mktemp -d)/AppIcon.iconset"
+        mkdir -p "$ICONSET"
+        sips -z 16 16 appicon.png --out "$ICONSET/icon_16x16.png" >/dev/null
+        sips -z 32 32 appicon.png --out "$ICONSET/icon_16x16@2x.png" >/dev/null
+        sips -z 32 32 appicon.png --out "$ICONSET/icon_32x32.png" >/dev/null
+        sips -z 64 64 appicon.png --out "$ICONSET/icon_32x32@2x.png" >/dev/null
+        sips -z 128 128 appicon.png --out "$ICONSET/icon_128x128.png" >/dev/null
+        sips -z 256 256 appicon.png --out "$ICONSET/icon_128x128@2x.png" >/dev/null
+        sips -z 256 256 appicon.png --out "$ICONSET/icon_256x256.png" >/dev/null
+        sips -z 512 512 appicon.png --out "$ICONSET/icon_256x256@2x.png" >/dev/null
+        sips -z 512 512 appicon.png --out "$ICONSET/icon_512x512.png" >/dev/null
+        sips -z 1024 1024 appicon.png --out "$ICONSET/icon_512x512@2x.png" >/dev/null
+        iconutil -c icns "$ICONSET" -o darwin/icons.icns
+
+  dev:frontend:
+    summary: Runs the frontend in development mode
+    dir: frontend
+    deps:
+      - task: install:frontend:deps
+    cmds:
+      - npm run dev -- --port {{.VITE_PORT}} --strictPort
+
+  update:build-assets:
+    summary: Updates the build assets
+    dir: build
+    cmds:
+      - wails3 update build-assets -name "{{.APP_NAME}}" -binaryname "{{.APP_NAME}}" -config config.yml -dir .

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' wails: 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: wails:; font-src 'self' data: wails:; style-src 'self' 'unsafe-inline' wails:; script-src 'self' 'unsafe-inline' 'unsafe-eval' wails:; connect-src 'self' wails:;">
+    <title>ChromeManager 4.0</title>
+    <link rel="stylesheet" href="./src/style.css" />
+    <link rel="stylesheet" href="./src/app.css" />
+</head>
+<body>
+    <div id="app" class="browser-extension-dashboard">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <div class="app-icon">
+                    <img src="./src/assets/images/logo-universal.png" alt="ChromeManager" class="icon-img">
+                </div>
+                <span class="app-title">NoBiggie社区Chrome多窗口管理器 V4.0</span>
+            </div>
+            <div class="window-controls">
+                <button class="window-control-btn" id="minimize-btn">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M6 19h12"/>
+                    </svg>
+                </button>
+                <button class="window-control-btn" id="maximize-btn">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                    </svg>
+                </button>
+                <button class="window-control-btn" id="close-btn">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Left Content -->
+            <div class="left-content">
+                <!-- Toolbar -->
+                <div class="toolbar">
+                    <button class="toolbar-btn primary" id="import-windows-btn">导入窗口</button>
+                    <button class="toolbar-btn secondary" id="configure-all-btn">全部选择</button>
+                    <button class="toolbar-btn secondary" id="auto-arrange-btn">自动排列</button>
+                    <button class="toolbar-btn secondary" id="close-windows-btn">关闭窗口</button>
+                    <button class="button" id="sync-toggle-btn" style="vertical-align:middle"><span>开始同步</span></button>
+                    <button class="toolbar-btn secondary" id="settings-btn"> 参数设置</button>
+                </div>
+
+                <!-- Window List Area -->
+                <div class="window-list-container">
+                    <div class="window-list-panel">
+                        <!-- Table Header -->
+                        <div class="table-header">
+                            <div class="col-select">选择</div>
+                            <div class="col-separator">|</div>
+                            <div class="col-number">窗口序号</div>
+                            <div class="col-separator">|</div>
+                            <div class="col-title">页面标题</div>
+                            <div class="col-separator">|</div>
+                            <div class="col-master">主控</div>
+                        </div>
+
+                        <!-- Table Content -->
+                        <div class="table-content" id="window-table-content">
+                            <!-- Window rows will be dynamically generated -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Sidebar -->
+            <div class="right-sidebar">
+                <div class="sidebar-panel">
+                    <!-- Module Header -->
+                    <div class="panel-header">
+                        <h3>自定义排列</h3>
+                    </div>
+
+                    <div class="config-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>起始X坐标</label>
+                                <input type="text" id="startX" value="0" class="form-input" autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <label>起始Y坐标</label>
+                                <input type="text" id="startY" value="0" class="form-input" autocomplete="off">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>窗口宽度</label>
+                                <input type="text" id="width" value="500" class="form-input" autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <label>窗口高度</label>
+                                <input type="text" id="height" value="400" class="form-input" autocomplete="off">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>水平间距</label>
+                                <input type="text" id="horizontalSpacing" value="0" class="form-input" autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <label>垂直间距</label>
+                                <input type="text" id="verticalSpacing" value="0" class="form-input" autocomplete="off">
+                            </div>
+                        </div>
+
+                        <div class="form-row-inline">
+                            <div class="form-group">
+                                <label>每行窗口数</label>
+                                <input type="text" id="windowsPerRow" value="5" class="form-input" autocomplete="off">
+                            </div>
+                            <button class="form-inline-btn" id="custom-arrange-btn">自定义排列</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Tab Section -->
+        <div class="bottom-tabs">
+            <div class="tabs-container">
+                <div class="radio-input">
+                    <label>
+                        <input type="radio" id="value-1" name="tab-radio" value="value-1" data-tab="open-window" checked>
+                        <span>打开窗口</span>
+                    </label>
+                    <label>
+                        <input type="radio" id="value-2" name="tab-radio" value="value-2" data-tab="batch-open">
+                        <span>批量打开网页</span>
+                    </label>
+                    <label>
+                        <input type="radio" id="value-3" name="tab-radio" value="value-3" data-tab="tab-management">
+                        <span>标签页管理</span>
+                    </label>
+                    <label>
+                        <input type="radio" id="value-4" name="tab-radio" value="value-4" data-tab="batch-input">
+                        <span>批量文本输入</span>
+                    </label>
+                    <label>
+                        <input type="radio" id="value-5" name="tab-radio" value="value-5" data-tab="batch-env">
+                        <span>批量创建环境</span>
+                    </label>
+                    <label>
+                        <input type="radio" id="value-6" name="tab-radio" value="value-6" data-tab="browser-cache-clean">
+                        <span>环境缓存清理</span>
+                    </label>
+                    <label>
+                        <input type="radio" id="value-7" name="tab-radio" value="value-7" data-tab="automation">
+                        <span>自动化</span>
+                    </label>
+                    <span class="selection"></span>
+                </div>
+
+                <div class="tab-content">
+                    <div class="tab-pane active" id="open-window">
+                        <div class="tab-controls">
+                            <span class="control-label">分组:</span>
+                            <select id="open-window-group-select" class="range-input" style="width: 120px;">
+                                <option value="">加载中...</option>
+                            </select>
+                            <span class="control-label">窗口编号:</span>
+                            <input type="text" id="window-range" value="1-10" class="range-input" style="width: 150px;" placeholder="例如: 1-5 或 1,3,5" autocomplete="off">
+                            <button class="control-btn" id="open-window-btn">打开窗口</button>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="batch-open">
+                        <div class="tab-controls batch-open">
+                            <span class="control-label">网址:</span>
+                            <input type="text" id="url-input" value="www.google.com" class="range-input" style="width: 150px;" autocomplete="off">
+                            <button class="control-btn" id="batch-open-btn">批量打开</button>
+                            <select id="custom-url-select" class="range-input" style="width: 150px;">
+                                <option value="">选择预设网址</option>
+                            </select>
+                            <button class="control-btn" id="manage-urls-btn">自定义网址</button>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="tab-management">
+                        <div class="tab-controls">
+                            <button class="control-btn" id="keep-current-tab-btn" style="width: 140px;">仅保留当前标签页</button>
+                            <button class="control-btn" id="keep-new-tab-btn" style="width: 140px;">仅保留新标签页</button>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="batch-input">
+                        <div class="tab-controls">
+                            <button class="control-btn" id="random-number-btn" style="width: 140px;">随机数字输入</button>
+                            <button class="control-btn" id="text-input-btn" style="width: 140px;">指定文本输入</button>
+
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="batch-env">
+                        <div class="tab-controls">
+                            <span class="control-label">分组:</span>
+                            <select id="batch-env-group-select" class="range-input" style="width: 120px;">
+                                <option value="">加载中...</option>
+                            </select>
+                            <span class="control-label">创建编号:</span>
+                            <input type="text" id="env-numbers" value="" class="range-input" style="width: 120px;" placeholder="例如: 1-5,7,9-12" autocomplete="off">
+                            <button class="control-btn" id="create-env-btn">开始创建</button>
+                        </div>
+                    </div>
+                    <div class="tab-pane" id="browser-cache-clean">
+                        <div class="tab-controls cache-clean-tab-controls">
+                            <span class="control-label">分组:</span>
+                            <select id="browser-cache-group-select" class="range-input" style="width: 120px;">
+                                <option value="">加载中...</option>
+                            </select>
+                            <span class="control-label">窗口编号:</span>
+                            <input type="text" id="browser-cache-window-range" value="1-10" class="range-input" style="width: 150px;" placeholder="例如: 1-5 或 1,3,5" autocomplete="off">
+                            <button class="control-btn" id="browser-cache-clean-btn">扫描并清理</button>
+                            <button
+                                type="button"
+                                class="cache-clean-help-icon"
+                                title="按分组和窗口编号扫描对应环境的安全缓存目录，释放空间，不触碰插件、书签、Cookie 和登录数据。"
+                                aria-label="缓存清理说明"
+                            >?</button>
+                        </div>
+                    </div>
+                    <div class="tab-pane" id="automation">
+                        <div class="tab-controls automation-tab-controls">
+                            <button class="control-btn" id="automation-openclaw-btn">OpenClaw 接入</button>
+                            <button class="control-btn" id="automation-examples-btn">示例指令</button>
+                            <span class="automation-tab-description">用于通过 OpenClaw 调用 ChromeManager 执行自动化任务</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <div class="footer-content">
+                <a href="https://tip-receipt.vercel.app/" target="_blank" class="footer-link">打赏0.1SOL并铸造一张NFT留作纪念</a>
+                <span class="footer-right">
+                    Compiled by Devilflasher 
+                    <a href="https://x.com/DevilflasherX" target="_blank" class="footer-link">Twitter</a> 
+                    <a href="https://x.com/i/chat/group_join/g2043878131141095639/HSWv2DsC7g" target="_blank" class="footer-link">XChat社区群</a>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+</body>
+</html>

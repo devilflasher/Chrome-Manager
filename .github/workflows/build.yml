@@ -1,0 +1,154 @@
+name: Build ChromeManager
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows amd64
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: "ChromeManager V4.0_win"
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.3"
+          cache-dependency-path: "ChromeManager V4.0_win/go.sum"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: "ChromeManager V4.0_win/frontend/package-lock.json"
+
+      - name: Install build tools
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          go install github.com/go-task/task/v3/cmd/task@v3.44.1
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.24
+          "$(go env GOPATH)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build production executable
+        run: task build PRODUCTION=true
+
+      - name: Prepare Windows release file
+        shell: pwsh
+        run: Copy-Item -LiteralPath bin/ChromeManager.exe -Destination bin/ChromeManager-Windows-amd64.exe
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChromeManager-Windows-amd64
+          path: "ChromeManager V4.0_win/bin/ChromeManager-Windows-amd64.exe"
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    name: macOS universal
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: "ChromeManager V4.0_mac"
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.3"
+          cache-dependency-path: "ChromeManager V4.0_mac/go.sum"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: "ChromeManager V4.0_mac/frontend/package-lock.json"
+
+      - name: Install Task
+        run: |
+          go install github.com/go-task/task/v3/cmd/task@v3.44.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build universal app bundle
+        run: task package:universal PRODUCTION=true
+
+      - name: Ad-hoc sign macOS app bundle
+        run: |
+          codesign --force --deep --sign - bin/ChromeManager.app
+          codesign --verify --deep --strict --verbose=2 bin/ChromeManager.app
+
+      - name: Create macOS disk image
+        run: |
+          xattr -cr bin/ChromeManager.app
+          staging_dir="$(mktemp -d)"
+          trap 'rm -rf "$staging_dir"' EXIT
+          ditto bin/ChromeManager.app "$staging_dir/ChromeManager.app"
+          ln -s /Applications "$staging_dir/Applications"
+          hdiutil create -volname "ChromeManager" -srcfolder "$staging_dir" -ov -format UDZO bin/ChromeManager-macOS-universal.dmg
+
+      - name: Upload macOS app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChromeManager-macOS-universal
+          path: "ChromeManager V4.0_mac/bin/ChromeManager-macOS-universal.dmg"
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - windows
+      - macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ChromeManager-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "ChromeManager $GITHUB_REF_NAME" \
+              --notes $'ChromeManager V4.0 版本发布。\n\n本次发布包含 Windows 与 macOS 构建产物，详细说明请参阅 README。'
+          fi

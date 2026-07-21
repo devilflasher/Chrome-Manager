@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=ChromeManager
+Comment=Multi-browser environment management and sync tool
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/ChromeManager %u
+Terminal=false
+Type=Application
+Icon=ChromeManager
+Categories=Utility;
+StartupWMClass=ChromeManager
+
+ 
