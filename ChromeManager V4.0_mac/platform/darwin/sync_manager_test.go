@@ -6,6 +6,7 @@ import (
 	"chromemanager/platform/common"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestButtonTransitionsUseReliableDelivery(t *testing.T) {
@@ -22,14 +23,34 @@ func TestButtonTransitionsUseReliableDelivery(t *testing.T) {
 }
 
 func TestPageDOMClickRouteIsDeterministic(t *testing.T) {
-	if !usesPageDOMClickRoute("https://example.com", 120, 90) {
+	if !usesPageDOMClickRoute("https://example.com", 120, 90, true) {
 		t.Fatal("HTTP page viewport click must use the DOM route")
 	}
-	if usesPageDOMClickRoute("https://example.com", 80, 90) {
+	if usesPageDOMClickRoute("https://example.com", 120, 90, false) {
+		t.Fatal("page click must retain the native route until its DOM binding is ready")
+	}
+	if usesPageDOMClickRoute("https://example.com", 80, 90, true) {
 		t.Fatal("Chrome toolbar click must not use the page DOM route")
 	}
-	if usesPageDOMClickRoute("chrome://newtab/", 120, 90) {
+	if usesPageDOMClickRoute("chrome://newtab/", 120, 90, true) {
 		t.Fatal("Chrome internal page must retain its native route")
+	}
+}
+
+func TestExtensionLeftClickUsesSingleDOMRoute(t *testing.T) {
+	const extensionURL = "chrome-extension://example/popup.html"
+	for _, evtType := range []int{1, 2} {
+		if !usesExtensionDOMClickRoute(extensionURL, evtType) {
+			t.Fatalf("extension left-button event %d must use the DOM route", evtType)
+		}
+	}
+	for _, evtType := range []int{3, 4, 22} {
+		if usesExtensionDOMClickRoute(extensionURL, evtType) {
+			t.Fatalf("extension event %d must retain its native route", evtType)
+		}
+	}
+	if usesExtensionDOMClickRoute("https://example.com", 1) {
+		t.Fatal("ordinary page clicks must use the page routing decision")
 	}
 }
 
@@ -39,6 +60,15 @@ func TestChromeTopUICoordinatesAreNotReplayed(t *testing.T) {
 	}
 	if isChromeTopUIEvent(120, 90) {
 		t.Fatal("page viewport click must remain eligible for synchronization")
+	}
+}
+
+func TestChromeTopUIOffsetKeepsSafeMinimum(t *testing.T) {
+	if got := effectiveChromeTopUIOffset(62); got != DefaultChromeTopUIHeight {
+		t.Fatalf("effectiveChromeTopUIOffset(62) = %.0f, want %d", got, DefaultChromeTopUIHeight)
+	}
+	if got := effectiveChromeTopUIOffset(96); got != 96 {
+		t.Fatalf("effectiveChromeTopUIOffset(96) = %.0f, want 96", got)
 	}
 }
 
@@ -78,6 +108,43 @@ func TestPreferredTargetWinsBeforeChromeVisibilitySettles(t *testing.T) {
 	}
 	if _, err := selectActiveBrowserTab(tabs, "missing-target"); err == nil {
 		t.Fatal("missing preferred target must return an error")
+	}
+}
+
+func TestPageTargetCommitResetsStaleInputRoutes(t *testing.T) {
+	sm := &SyncManager{
+		keyboardExtensionURL:      "chrome-extension://example/popup.html",
+		lastClickX:                42,
+		lastClickY:                20,
+		lastViewportClickTime:     time.Now(),
+		lastViewportClickTarget:   "old-target",
+		lastViewportClickReplayed: true,
+		leftRoute: nativeExtensionPointerRoute{
+			extensionURL: "chrome-extension://example/popup.html",
+		},
+		rightRoute: nativeExtensionPointerRoute{
+			extensionURL: "chrome-extension://example/popup.html",
+		},
+		lastTabActivationTarget: "old-target",
+		lastTabActivationAt:     time.Now(),
+	}
+
+	sm.resetPageInputRoute()
+
+	if sm.keyboardExtensionURL != "" {
+		t.Fatalf("keyboard extension route survived page target commit: %q", sm.keyboardExtensionURL)
+	}
+	if sm.lastClickX != 0 || sm.lastClickY <= DefaultChromeTopUIHeight {
+		t.Fatalf("page keyboard route remains blocked by click state: (%d,%d)", sm.lastClickX, sm.lastClickY)
+	}
+	if sm.lastViewportClickTarget != "" || sm.lastViewportClickReplayed || !sm.lastViewportClickTime.IsZero() {
+		t.Fatal("viewport click origin survived page target commit")
+	}
+	if sm.leftRoute.extensionURL != "" || sm.rightRoute.extensionURL != "" {
+		t.Fatal("extension pointer route survived page target commit")
+	}
+	if sm.lastTabActivationTarget != "" || !sm.lastTabActivationAt.IsZero() {
+		t.Fatal("tab activation deduplication survived page target commit")
 	}
 }
 
@@ -173,6 +240,78 @@ func TestMappedSessionForEventUsesExplicitTargetMap(t *testing.T) {
 	msg.MasterTargetID = "unmapped-target"
 	if got := sm.mappedSessionForEvent(slavePID, slave, msg); got != "" {
 		t.Fatalf("unmapped event guessed session %q", got)
+	}
+}
+
+func TestMappedSessionForEventResolvesVisibleExtensionWithoutTargetMap(t *testing.T) {
+	const slavePID = 202
+	const extensionURL = "chrome-extension://example/popup.html#/confirm"
+	slave := &CDPClient{
+		sessionOrder:                 []string{"slave-extension-session"},
+		sessionURLs:                  map[string]string{"slave-extension-session": extensionURL},
+		sessionTypes:                 map[string]string{"slave-extension-session": "page"},
+		sessionTargets:               map[string]string{"slave-extension-session": "slave-extension-target"},
+		targetSessions:               map[string]string{"slave-extension-target": "slave-extension-session"},
+		lastVisibleExtensionTargetID: "slave-extension-target",
+		lastVisibleExtensionURL:      extensionURL,
+	}
+	sm := &SyncManager{masterWindow: 101, targetMap: map[string]map[int]string{}}
+	msg := NativeSyncEvent{
+		MasterTargetID: "master-extension-target",
+		ExtensionURL:   extensionURL,
+	}
+	if got := sm.mappedSessionForEvent(slavePID, slave, msg); got != "slave-extension-session" {
+		t.Fatalf("mappedSessionForEvent() = %q, want slave-extension-session", got)
+	}
+}
+
+func TestPagePopupOriginIsClearedByToolbarClick(t *testing.T) {
+	sm := &SyncManager{lastClickY: DefaultChromeTopUIHeight + 1}
+	sm.touchViewportClick("page-target", false)
+	if !sm.hasViewportClickOrigin("") {
+		t.Fatal("page click must identify a page-triggered popup")
+	}
+	sm.clearRecentViewportClick()
+	if sm.hasViewportClickOrigin("") {
+		t.Fatal("toolbar interaction must clear the page-triggered popup marker")
+	}
+}
+
+func TestPagePopupOriginSurvivesDelayedWalletLaunch(t *testing.T) {
+	sm := &SyncManager{lastClickY: DefaultChromeTopUIHeight + 1}
+	sm.touchViewportClick("page-target", false)
+	sm.lastViewportClickMutex.Lock()
+	sm.lastViewportClickTime = time.Now().Add(-30 * time.Second)
+	sm.lastViewportClickMutex.Unlock()
+
+	if !sm.hasViewportClickOrigin("") {
+		t.Fatal("delayed wallet target must retain its page-click origin")
+	}
+}
+
+func TestPagePopupOriginMustMatchExplicitOpener(t *testing.T) {
+	sm := &SyncManager{lastClickY: DefaultChromeTopUIHeight + 1}
+	sm.touchViewportClick("page-target", false)
+	if !sm.hasViewportClickOrigin("page-target") {
+		t.Fatal("matching page opener must identify a page-triggered popup")
+	}
+	if sm.hasViewportClickOrigin("another-target") {
+		t.Fatal("unrelated opener must not inherit an earlier page click")
+	}
+}
+
+func TestSlaveExtensionTargetMapsToCurrentMasterPopup(t *testing.T) {
+	sm := &SyncManager{
+		targetMap:          make(map[string]map[int]string),
+		masterPopupTargets: make(map[string]string),
+		masterPopupByExt:   make(map[string]string),
+	}
+	if _, ok := sm.beginMasterExtensionPopup("master-popup", "example"); !ok {
+		t.Fatal("master popup was not registered")
+	}
+	sm.handleSlaveExtensionTargetCreated(202, "slave-popup", "chrome-extension://example/popup.html")
+	if got := sm.targetMap["master-popup"][202]; got != "slave-popup" {
+		t.Fatalf("slave popup mapping = %q, want slave-popup", got)
 	}
 }
 

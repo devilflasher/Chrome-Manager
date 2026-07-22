@@ -2748,7 +2748,36 @@ func (c *ChromeService) KeepOnlyCurrentTab(windowNumbers []int) error {
 	if state.MasterWindowInfo != nil {
 		masterNumber = state.MasterWindowInfo.Number
 	}
-	return c.tabManager.KeepOnlyCurrentTab(windowNumbers, c, masterNumber)
+
+	syncWasRunning := c.syncManager.IsRunning()
+	preferredTargets := make(map[int]string, len(windowNumbers))
+	if syncWasRunning {
+		if err := c.syncManager.PauseSync(); err != nil {
+			return err
+		}
+		defer func() {
+			_ = c.syncManager.ResumeSync()
+		}()
+		for _, windowNumber := range windowNumbers {
+			windowInfo := c.syncManager.GetWindowByID(windowNumber)
+			if windowInfo == nil || windowInfo.PID <= 0 {
+				continue
+			}
+			if targetID := c.GetActiveTargetID(windowInfo.PID); targetID != "" {
+				preferredTargets[int(windowInfo.PID)] = targetID
+			}
+		}
+	}
+
+	if err := c.tabManager.KeepOnlyCurrentTab(windowNumbers, c, masterNumber); err != nil {
+		return err
+	}
+	if syncWasRunning {
+		if err := c.syncManager.RefreshPageTargetMappings(preferredTargets); err != nil {
+			return fmt.Errorf("当前标签页已保留，但同步目标重新绑定失败: %w", err)
+		}
+	}
+	return nil
 }
 
 // KeepOnlyNewTab 仅保留新标签页，关闭其他标签页

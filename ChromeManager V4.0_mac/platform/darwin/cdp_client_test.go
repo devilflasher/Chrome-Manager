@@ -2,10 +2,100 @@ package darwin
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestFrameNavigationAfterTargetInfoChangeIsNotReload(t *testing.T) {
+	c := NewCDPClient(0)
+	c.isInitialized = true
+	c.sessionURLs["session"] = "https://www.google.com/"
+	c.sessionCommittedURLs["session"] = "https://www.google.com/"
+	c.sessionTargets["session"] = "target"
+	c.sessionTypes["session"] = "page"
+	c.sessionLoaderIDs["session"] = "loader-home"
+	c.targetSessions["target"] = "session"
+	c.targets["target"] = "https://www.google.com/"
+	c.knownPageTargets["target"] = true
+
+	reloaded := make(chan string, 1)
+	c.OnURLReloaded = func(_ string, url string) {
+		reloaded <- url
+	}
+
+	searchURL := "https://www.google.com/search?q=chromemanager"
+	c.handleMessage(map[string]interface{}{
+		"method": "Target.targetInfoChanged",
+		"params": map[string]interface{}{
+			"targetInfo": map[string]interface{}{
+				"targetId": "target",
+				"type":     "page",
+				"url":      searchURL,
+			},
+		},
+	})
+	c.handleMessage(map[string]interface{}{
+		"method":    "Page.frameNavigated",
+		"sessionId": "session",
+		"params": map[string]interface{}{
+			"frame": map[string]interface{}{
+				"id":       "target",
+				"url":      searchURL,
+				"loaderId": "loader-search",
+			},
+		},
+	})
+
+	select {
+	case url := <-reloaded:
+		t.Fatalf("ordinary navigation was reported as reload: %s", url)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := c.sessionCommittedURLs["session"]; got != searchURL {
+		t.Fatalf("committed URL = %q, want %q", got, searchURL)
+	}
+
+	c.handleMessage(map[string]interface{}{
+		"method":    "Page.frameNavigated",
+		"sessionId": "session",
+		"params": map[string]interface{}{
+			"frame": map[string]interface{}{
+				"id":       "target",
+				"url":      searchURL,
+				"loaderId": "loader-reload",
+			},
+		},
+	})
+
+	select {
+	case url := <-reloaded:
+		if url != searchURL {
+			t.Fatalf("reload URL = %q, want %q", url, searchURL)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("real reload was not reported")
+	}
+}
+
+func TestInstalledExtensionDetectionDoesNotRequireRuntimeTarget(t *testing.T) {
+	userDataDir := t.TempDir()
+	client := NewCDPClient(9222)
+	client.setUserDataDir(userDataDir)
+	const extensionID = "bfnaelmomeimhlpmgjnjophhpkkoljpa"
+
+	if client.hasInstalledExtensionOnDisk(extensionID) {
+		t.Fatal("extension must not be detected before its install directory exists")
+	}
+	if err := os.MkdirAll(filepath.Join(userDataDir, "Default", "Extensions", extensionID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !client.hasInstalledExtensionOnDisk(extensionID) {
+		t.Fatal("installed extension directory must be detected while its service worker is dormant")
+	}
+}
 
 func TestTabVisibilityBindingUsesPageLifecycle(t *testing.T) {
 	for _, token := range []string{"document.visibilityState", "visibilitychange", "pageshow"} {
@@ -273,6 +363,54 @@ func TestActiveSessionRejectsExtensionPopupAndFrame(t *testing.T) {
 	}
 }
 
+func TestPageDOMClickPromotesNewTabSession(t *testing.T) {
+	c := &CDPClient{
+		activeSessionID:  "old-session",
+		activeSessionURL: "https://www.baidu.com/",
+		sessionURLs: map[string]string{
+			"old-session": "https://www.baidu.com/",
+			"new-session": "https://www.baidu.com/more/",
+		},
+		sessionTargets: map[string]string{
+			"old-session": "old-target",
+			"new-session": "new-target",
+		},
+		sessionTypes: map[string]string{
+			"old-session": "page",
+			"new-session": "page",
+		},
+	}
+
+	targetID, sessionID := c.pageRouteForDOMClick("new-session", "https://www.baidu.com/more/")
+	if targetID != "new-target" || sessionID != "new-session" {
+		t.Fatalf("pageRouteForDOMClick() = (%q, %q), want new target/session", targetID, sessionID)
+	}
+	if c.activeSessionID != "new-session" || c.activeSessionURL != "https://www.baidu.com/more/" {
+		t.Fatalf("new tab was not promoted: session=%q url=%q", c.activeSessionID, c.activeSessionURL)
+	}
+}
+
+func TestPageDOMClickRejectsMismatchedSessionURL(t *testing.T) {
+	c := &CDPClient{
+		activeSessionID:  "old-session",
+		activeSessionURL: "https://www.baidu.com/",
+		sessionURLs: map[string]string{
+			"old-session": "https://www.baidu.com/",
+			"new-session": "https://www.baidu.com/more/",
+		},
+		sessionTargets: map[string]string{"new-session": "new-target"},
+		sessionTypes:   map[string]string{"new-session": "page"},
+	}
+
+	targetID, sessionID := c.pageRouteForDOMClick("new-session", "https://example.com/")
+	if targetID != "" || sessionID != "" {
+		t.Fatalf("pageRouteForDOMClick() accepted mismatched URL: (%q, %q)", targetID, sessionID)
+	}
+	if c.activeSessionID != "old-session" || c.activeSessionURL != "https://www.baidu.com/" {
+		t.Fatalf("mismatched callback changed active route: session=%q url=%q", c.activeSessionID, c.activeSessionURL)
+	}
+}
+
 func TestExtensionRoutePrefersActiveFullPageOverStalePopup(t *testing.T) {
 	c := &CDPClient{
 		activeSessionID:              "full-session",
@@ -355,7 +493,7 @@ func TestDestroyedExtensionSessionRestoresLastActivePage(t *testing.T) {
 		},
 		sessionURLs: map[string]string{
 			"web-session":       "https://example.com",
-			"extension-session": "chrome-extension://example/notification.html",
+			"extension-session": "chrome-extension://example/home.html",
 		},
 		sessionTargets: map[string]string{
 			"web-session":       "web-target",
@@ -372,7 +510,7 @@ func TestDestroyedExtensionSessionRestoresLastActivePage(t *testing.T) {
 		},
 		targets: map[string]string{
 			"web-target":       "https://example.com",
-			"extension-target": "chrome-extension://example/notification.html",
+			"extension-target": "chrome-extension://example/home.html",
 		},
 		knownPageTargets: map[string]bool{
 			"web-target":       true,
@@ -427,7 +565,7 @@ func TestDetachedExtensionSessionRestoresLastActivePage(t *testing.T) {
 		},
 		sessionURLs: map[string]string{
 			"web-session":       "https://example.com",
-			"extension-session": "chrome-extension://example/notification.html",
+			"extension-session": "chrome-extension://example/home.html",
 		},
 		sessionTargets: map[string]string{
 			"web-session":       "web-target",
@@ -548,6 +686,24 @@ func TestExtensionWindowContentInsetsForActionPopup(t *testing.T) {
 	}
 }
 
+func TestDeclaredExtensionPopupFallbackStaysNarrow(t *testing.T) {
+	for _, required := range []string{
+		"manifest.action&&manifest.action.default_popup",
+		"chrome.action.getPopup",
+		"chrome.action.setPopup({tabId:tab.id,popup:defaultPopup})",
+		"chrome.action.openPopup()",
+	} {
+		if !strings.Contains(declaredExtensionPopupScript, required) {
+			t.Fatalf("declared popup script missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"chrome.windows.create", "chrome.sidePanel", "setTimeout", "setInterval"} {
+		if strings.Contains(declaredExtensionPopupScript, forbidden) {
+			t.Fatalf("declared popup script must not use %q", forbidden)
+		}
+	}
+}
+
 func TestExtensionWindowContentInsetsForTitledWindow(t *testing.T) {
 	left, top := extensionWindowContentInsets(374, 658, 360, 600)
 	if left != 7 || top != 51 {
@@ -560,6 +716,7 @@ func TestExtensionVisibleTargetClassificationSupportsPopupAndSidePanel(t *testin
 		"chrome-extension://example/popup.html",
 		"chrome-extension://example/popup-init.html#/unlock",
 		"chrome-extension://example/sidepanel.html#/unlock",
+		"chrome-extension://example/notification.html#/unlock",
 	}
 	for _, targetURL := range tests {
 		if !isVisibleExtensionTarget("page", targetURL) {

@@ -178,6 +178,7 @@ type SyncManager struct {
 	popupLifecycleMu   sync.Mutex
 	popupOpenSeq       uint64
 	masterPopupTargets map[string]string
+	masterPopupByExt   map[string]string
 
 	pointerRouteMu sync.Mutex
 	leftRoute      nativeExtensionPointerRoute
@@ -210,6 +211,7 @@ func NewSyncManager() *SyncManager {
 			syncZoomIndex:        defaultChromeZoomIndex,
 			popupArrangeBaseLeft: make(map[uintptr]int),
 			masterPopupTargets:   make(map[string]string),
+			masterPopupByExt:     make(map[string]string),
 		}
 	})
 	return globalSyncManager
@@ -508,6 +510,57 @@ func (sm *SyncManager) hasRecentReplayedViewportClick(targetID string) bool {
 	return sm.lastViewportClickTarget == targetID && sm.lastViewportClickReplayed && time.Since(sm.lastViewportClickTime) < 2*time.Second
 }
 
+// hasViewportClickOrigin stays set until Chrome's top UI is clicked. When CDP
+// supplies an opener, it must be the page that received the viewport click.
+func (sm *SyncManager) hasViewportClickOrigin(openerTargetID string) bool {
+	sm.mu.RLock()
+	lastClickY := sm.lastClickY
+	uiOffset := sm.uiOffsets[int(sm.masterWindow)]
+	sm.mu.RUnlock()
+	if float64(lastClickY) <= effectiveChromeTopUIOffset(uiOffset) {
+		return false
+	}
+
+	sm.lastViewportClickMutex.Lock()
+	defer sm.lastViewportClickMutex.Unlock()
+	if sm.lastViewportClickTarget == "" {
+		return false
+	}
+	return openerTargetID == "" || openerTargetID == sm.lastViewportClickTarget
+}
+
+func (sm *SyncManager) clearRecentViewportClick() {
+	sm.lastViewportClickMutex.Lock()
+	sm.lastViewportClickTime = time.Time{}
+	sm.lastViewportClickTarget = ""
+	sm.lastViewportClickReplayed = false
+	sm.lastViewportClickMutex.Unlock()
+}
+
+// resetPageInputRoute makes a newly committed page target authoritative for
+// subsequent native input. Programmatic tab operations do not produce a page
+// click, so extension and pointer routes from the previous target must not
+// survive the mapping change.
+func (sm *SyncManager) resetPageInputRoute() {
+	sm.clearRecentViewportClick()
+
+	sm.mu.Lock()
+	sm.keyboardExtensionURL = ""
+	sm.lastClickX = 0
+	sm.lastClickY = DefaultChromeTopUIHeight + 1
+	sm.mu.Unlock()
+
+	sm.pointerRouteMu.Lock()
+	sm.leftRoute = nativeExtensionPointerRoute{}
+	sm.rightRoute = nativeExtensionPointerRoute{}
+	sm.pointerRouteMu.Unlock()
+
+	sm.tabActivationMu.Lock()
+	sm.lastTabActivationTarget = ""
+	sm.lastTabActivationAt = time.Time{}
+	sm.tabActivationMu.Unlock()
+}
+
 func (sm *SyncManager) shouldSkipDuplicateTabActivation(targetID string) bool {
 	if targetID == "" {
 		return false
@@ -542,6 +595,13 @@ func (sm *SyncManager) uiOffsetForPID(pid int) float64 {
 	}
 
 	return float64(DefaultChromeTopUIHeight)
+}
+
+func effectiveChromeTopUIOffset(uiOffset float64) float64 {
+	if uiOffset < float64(DefaultChromeTopUIHeight) {
+		return float64(DefaultChromeTopUIHeight)
+	}
+	return uiOffset
 }
 
 func clampFloat64(v, minV, maxV float64) float64 {
@@ -669,8 +729,12 @@ func pageNativeUIOffset(rect common.Rect, metrics CDPViewportMetrics, fallback f
 	return fallback
 }
 
-func usesPageDOMClickRoute(targetURL string, relativeY, uiOffset float64) bool {
-	return relativeY > uiOffset && supportsDOMClickBinding("page", targetURL)
+func usesPageDOMClickRoute(targetURL string, relativeY, uiOffset float64, ready bool) bool {
+	return ready && relativeY > uiOffset && supportsDOMClickBinding("page", targetURL)
+}
+
+func usesExtensionDOMClickRoute(targetURL string, evtType int) bool {
+	return isExtensionURL(targetURL) && (evtType == 1 || evtType == 2) && supportsDOMClickBinding("page", targetURL)
 }
 
 func isChromeTopUIEvent(relativeY, uiOffset float64) bool {
@@ -901,10 +965,14 @@ func (sm *SyncManager) beginMasterExtensionPopup(targetID string, extensionID st
 	if sm.masterPopupTargets == nil {
 		sm.masterPopupTargets = make(map[string]string)
 	}
+	if sm.masterPopupByExt == nil {
+		sm.masterPopupByExt = make(map[string]string)
+	}
 	if _, ok := sm.masterPopupTargets[targetID]; ok {
 		return sm.popupOpenSeq, false
 	}
 	sm.masterPopupTargets[targetID] = extensionID
+	sm.masterPopupByExt[extensionID] = targetID
 	sm.popupOpenSeq++
 	return sm.popupOpenSeq, true
 }
@@ -930,9 +998,42 @@ func (sm *SyncManager) consumeMasterPopupTarget(targetID string) (string, bool) 
 	extensionID, ok := sm.masterPopupTargets[targetID]
 	if ok {
 		delete(sm.masterPopupTargets, targetID)
+		if sm.masterPopupByExt[extensionID] == targetID {
+			delete(sm.masterPopupByExt, extensionID)
+		}
 		sm.popupOpenSeq++
 	}
 	return extensionID, ok
+}
+
+func (sm *SyncManager) currentMasterPopupTarget(extensionID string) string {
+	sm.popupLifecycleMu.Lock()
+	defer sm.popupLifecycleMu.Unlock()
+	return sm.masterPopupByExt[extensionID]
+}
+
+func (sm *SyncManager) mapSlaveExtensionTarget(masterTargetID string, pid int, slaveTargetID string) {
+	if masterTargetID == "" || pid <= 0 || slaveTargetID == "" {
+		return
+	}
+	sm.targetMapMutex.Lock()
+	if _, ok := sm.targetMap[masterTargetID]; !ok {
+		sm.targetMap[masterTargetID] = make(map[int]string)
+	}
+	sm.targetMap[masterTargetID][pid] = slaveTargetID
+	sm.targetMapMutex.Unlock()
+}
+
+func (sm *SyncManager) handleSlaveExtensionTargetCreated(pid int, slaveTargetID string, targetURL string) {
+	extensionID := extensionIDFromURL(targetURL)
+	if extensionID == "" {
+		return
+	}
+	masterTargetID := sm.currentMasterPopupTarget(extensionID)
+	if masterTargetID == "" {
+		return
+	}
+	sm.mapSlaveExtensionTarget(masterTargetID, pid, slaveTargetID)
 }
 
 func (sm *SyncManager) storeExtensionPointerRoute(evtType int, route nativeExtensionPointerRoute) {
@@ -1552,17 +1653,16 @@ func (sm *SyncManager) handleMasterDOMClick(sessionID string, action DOMClickAct
 	if isExtensionURL(action.SourceURL) {
 		masterTargetID, masterSessionID = masterCDP.extensionRouteSnapshot(action.SourceURL)
 	} else {
-		activeTargetID, activeSessionID, activeURL := masterCDP.activeRouteSnapshot()
-		if activeSessionID != sessionID || !sameComparableURL(activeURL, action.SourceURL) {
-			return
-		}
-		masterTargetID = activeTargetID
-		masterSessionID = activeSessionID
+		masterTargetID, masterSessionID = masterCDP.pageRouteForDOMClick(sessionID, action.SourceURL)
 	}
 	if masterTargetID == "" || masterSessionID == "" {
 		return
 	}
-	sm.markViewportClickReplayed(masterTargetID)
+	if isExtensionURL(action.SourceURL) {
+		sm.touchViewportClick(masterTargetID, true)
+	} else {
+		sm.markViewportClickReplayed(masterTargetID)
+	}
 	sm.broadcastNativeEvent(NativeSyncEvent{
 		Type:            "dom_click",
 		MasterTargetID:  masterTargetID,
@@ -1572,7 +1672,7 @@ func (sm *SyncManager) handleMasterDOMClick(sessionID string, action DOMClickAct
 	}, true)
 }
 
-func (sm *SyncManager) handleMasterExtensionTargetCreated(masterTargetID string, targetType string, targetURL string) {
+func (sm *SyncManager) handleMasterExtensionTargetCreated(masterTargetID string, targetType string, targetURL string, openedByPageClick bool) {
 	extensionID := extensionIDFromURL(targetURL)
 	if extensionID == "" {
 		return
@@ -1635,6 +1735,10 @@ func (sm *SyncManager) handleMasterExtensionTargetCreated(masterTargetID string,
 			wg.Add(1)
 			go func(p int, c *CDPClient) {
 				defer wg.Done()
+				if openedByPageClick {
+					sm.mapExistingSlaveExtensionPopup(p, c, extensionID, masterTargetID)
+					return
+				}
 				sm.openAndMapSlaveExtensionPopup(p, c, extensionID, masterTargetID)
 			}(slave.pid, slave.cdp)
 		}
@@ -1669,6 +1773,19 @@ func (sm *SyncManager) handleMasterExtensionTargetCreated(masterTargetID string,
 	}()
 }
 
+func (sm *SyncManager) mapExistingSlaveExtensionPopup(pid int, c *CDPClient, extensionID string, masterTargetID string) bool {
+	if c == nil || !c.isConnected {
+		return false
+	}
+	c.ensureExtensionTargetsAttached(extensionID)
+	target, ok := c.visibleExtensionTarget(extensionID)
+	if !ok || target.targetID == "" {
+		return false
+	}
+	sm.mapSlaveExtensionTarget(masterTargetID, pid, target.targetID)
+	return true
+}
+
 func (sm *SyncManager) openAndMapSlaveExtensionPopup(pid int, c *CDPClient, extensionID string, masterTargetID string) bool {
 	if c == nil || !c.isConnected {
 		return false
@@ -1685,12 +1802,7 @@ func (sm *SyncManager) openAndMapSlaveExtensionPopup(pid int, c *CDPClient, exte
 		syncDebugf("[SyncManager] Slave CDP (PID %d) extension popup target not found after open\n", pid)
 		return false
 	}
-	sm.targetMapMutex.Lock()
-	if _, ok := sm.targetMap[masterTargetID]; !ok {
-		sm.targetMap[masterTargetID] = make(map[int]string)
-	}
-	sm.targetMap[masterTargetID][pid] = slaveTargetID
-	sm.targetMapMutex.Unlock()
+	sm.mapSlaveExtensionTarget(masterTargetID, pid, slaveTargetID)
 	syncDebugf("[SyncManager] Mapped Master Extension %s to Slave (PID %d) Target %s\n", masterTargetID, pid, slaveTargetID)
 	return true
 }
@@ -1765,45 +1877,6 @@ func (sm *SyncManager) handleMasterExtensionPageTargetCreated(masterTargetID str
 			sm.targetMap[masterTargetID][p] = slaveTargetID
 			sm.targetMapMutex.Unlock()
 		}(slave.pid, slave.cdp)
-	}
-}
-
-func (sm *SyncManager) prepareExtensionActionPopupBehavior() {
-	sm.mu.RLock()
-	clients := make([]*CDPClient, 0, len(sm.slaveCDPs)+1)
-	if sm.masterCDP != nil && sm.masterCDP.isConnected {
-		clients = append(clients, sm.masterCDP)
-	}
-	for _, cdp := range sm.slaveCDPs {
-		if cdp != nil && cdp.isConnected {
-			clients = append(clients, cdp)
-		}
-	}
-	sm.mu.RUnlock()
-
-	if len(clients) == 0 {
-		return
-	}
-
-	var wg sync.WaitGroup
-	changed := 0
-	var changedMu sync.Mutex
-	for _, cdp := range clients {
-		wg.Add(1)
-		go func(c *CDPClient) {
-			defer wg.Done()
-			n := c.prepareExtensionActionPopupBehavior()
-			if n == 0 {
-				return
-			}
-			changedMu.Lock()
-			changed += n
-			changedMu.Unlock()
-		}(cdp)
-	}
-	wg.Wait()
-	if changed > 0 {
-		syncDebugf("[SyncManager] Prepared extension side panel behavior for popup sync: changed=%d clients=%d\n", changed, len(clients))
 	}
 }
 
@@ -1959,6 +2032,7 @@ func (sm *SyncManager) Start(masterWindow common.WindowHandle, slaveWindows []co
 	sm.popupLifecycleMu.Lock()
 	sm.popupOpenSeq++
 	sm.masterPopupTargets = make(map[string]string)
+	sm.masterPopupByExt = make(map[string]string)
 	sm.popupLifecycleMu.Unlock()
 
 	sm.pointerRouteMu.Lock()
@@ -1978,6 +2052,7 @@ func (sm *SyncManager) Start(masterWindow common.WindowHandle, slaveWindows []co
 	if cmdLine, err := GetProcessCommandLine(masterPID); err == nil {
 		if port := utils.ExtractDebugPort(cmdLine); port > 0 {
 			sm.masterCDP = NewCDPClient(port)
+			sm.masterCDP.setUserDataDir(utils.ExtractUserDataDir(cmdLine))
 			sm.masterCDP.OnExtensionInput = sm.handleMasterExtensionInput
 			sm.masterCDP.OnDOMClick = sm.handleMasterDOMClick
 
@@ -2061,7 +2136,9 @@ func (sm *SyncManager) Start(masterWindow common.WindowHandle, slaveWindows []co
 
 				if isVisibleExtensionTarget(targetType, url) {
 					sm.mu.RUnlock()
-					sm.handleMasterExtensionTargetCreated(masterTargetID, targetType, url)
+					openedByPageClick := sm.hasViewportClickOrigin(openerTargetID)
+					syncDebugf("[ExtensionPopup] source target=%s opener=%s pageClick=%t url=%s\n", masterTargetID, openerTargetID, openedByPageClick, url)
+					sm.handleMasterExtensionTargetCreated(masterTargetID, targetType, url, openedByPageClick)
 					return
 				}
 				if isExtensionFullPageTarget(targetType, url) {
@@ -2070,6 +2147,11 @@ func (sm *SyncManager) Start(masterWindow common.WindowHandle, slaveWindows []co
 					return
 				}
 				defer sm.mu.RUnlock()
+
+				// Normal new tabs are activated on every slave below. Promote the
+				// corresponding master target immediately as well, so its first page
+				// click does not wait for the asynchronous visibility binding.
+				sm.masterCDP.setActiveTarget(masterTargetID)
 
 				// Same deduplication for TargetCreated
 				if sm.hasRecentReplayedViewportClick(openerTargetID) && !isBrowserInternalSyncURL(url) {
@@ -2195,8 +2277,14 @@ func (sm *SyncManager) Start(masterWindow common.WindowHandle, slaveWindows []co
 		if cmdLine, err := GetProcessCommandLine(int32(slavePID)); err == nil {
 			if port := utils.ExtractDebugPort(cmdLine); port > 0 {
 				cdp := NewCDPClient(port)
+				cdp.setUserDataDir(utils.ExtractUserDataDir(cmdLine))
 				cdp.OnNavigate = func(_ string, url string) {
 					go sm.reapplyCurrentZoomToPID(slavePID, cdp, "slave-frame-navigated")
+				}
+				cdp.OnTargetCreated = func(targetID string, _ string, targetType string, url string) {
+					if isVisibleExtensionTarget(targetType, url) {
+						sm.handleSlaveExtensionTargetCreated(slavePID, targetID, url)
+					}
 				}
 				if err := cdp.Connect(); err != nil {
 					syncDebugf("[SyncManager] Slave CDP (PID %d) connect failed: %v\n", slavePID, err)
@@ -2234,8 +2322,6 @@ func (sm *SyncManager) Start(masterWindow common.WindowHandle, slaveWindows []co
 	}
 
 	sm.mu.Unlock() // Unlock before potentially long-running start
-
-	sm.prepareExtensionActionPopupBehavior()
 
 	// Build the initial map before accepting input. A missing active route must
 	// fail startup instead of leaving the UI in a misleading "syncing" state.
@@ -2294,6 +2380,7 @@ func (sm *SyncManager) cleanupStartFailureLocked() {
 	sm.popupLifecycleMu.Lock()
 	sm.popupOpenSeq++
 	sm.masterPopupTargets = make(map[string]string)
+	sm.masterPopupByExt = make(map[string]string)
 	sm.popupLifecycleMu.Unlock()
 	sm.pointerRouteMu.Lock()
 	sm.leftRoute = nativeExtensionPointerRoute{}
@@ -2330,7 +2417,25 @@ func (sm *SyncManager) masterPageRouteSnapshot() (targetID, sessionID, targetURL
 }
 
 func (sm *SyncManager) mappedSessionForEvent(pid int, cdp *CDPClient, msg NativeSyncEvent) string {
-	if cdp == nil || msg.MasterTargetID == "" {
+	if cdp == nil {
+		return ""
+	}
+	if msg.ExtensionURL != "" {
+		if sessionID := cdp.exactExtensionSessionID(msg.ExtensionURL); sessionID != "" {
+			return sessionID
+		}
+		if extensionID := extensionIDFromURL(msg.ExtensionURL); extensionID != "" {
+			cdp.ensureExtensionTargetsAttached(extensionID)
+			if sessionID := cdp.exactExtensionSessionID(msg.ExtensionURL); sessionID != "" {
+				return sessionID
+			}
+			_, sessionID := cdp.extensionRouteSnapshot(msg.ExtensionURL)
+			if sessionID != "" {
+				return sessionID
+			}
+		}
+	}
+	if msg.MasterTargetID == "" {
 		return ""
 	}
 
@@ -3011,6 +3116,35 @@ func (sm *SyncManager) HandleNativeMouseEvent(evtType, x, y, data, pid int) bool
 	if !ok || masterCDP == nil {
 		return false
 	}
+	insideMasterBounds := x >= masterRect.Left && x <= masterRect.Left+masterRect.Width &&
+		y >= masterRect.Top && y <= masterRect.Top+masterRect.Height
+	onMasterMainWindow := false
+	if insideMasterBounds {
+		if hit, hitOK := WindowAtPoint(x, y); hitOK {
+			onMasterMainWindow = int(hit.ProcessID) == masterPID && roughlySameRect(hit.Position, masterRect)
+		} else {
+			onMasterMainWindow = pid == masterPID
+		}
+	}
+
+	// Handle Chrome's toolbar before extension routes. A hidden extension target
+	// can outlive its popup and otherwise misclassify the next toolbar click as
+	// extension content, leaving the previous page-click origin active.
+	if onMasterMainWindow {
+		relX := float64(x - masterRect.Left)
+		relY := float64(y - masterRect.Top)
+		masterUIOffset := effectiveChromeTopUIOffset(sm.uiOffsetForPID(masterPID))
+		if isChromeTopUIEvent(relY, masterUIOffset) {
+			if evtType == 1 || evtType == 3 {
+				sm.clearRecentViewportClick()
+				sm.mu.Lock()
+				sm.lastClickX = int(relX)
+				sm.lastClickY = int(relY)
+				sm.mu.Unlock()
+			}
+			return false
+		}
+	}
 
 	if pairedRoute, paired := sm.takeExtensionPointerRoute(evtType); paired {
 		localX := float64(x - pairedRoute.popupRect.Left)
@@ -3029,6 +3163,9 @@ func (sm *SyncManager) HandleNativeMouseEvent(evtType, x, y, data, pid int) bool
 	}
 
 	if targetURL, contentX, contentY, contentW, contentH, routed := sm.masterExtensionWebAreaRoute(x, y); routed {
+		if usesExtensionDOMClickRoute(targetURL, evtType) {
+			return false
+		}
 		if evtType == 1 || evtType == 3 {
 			sm.storeExtensionPointerRoute(evtType, nativeExtensionPointerRoute{
 				extensionURL: targetURL,
@@ -3048,6 +3185,9 @@ func (sm *SyncManager) HandleNativeMouseEvent(evtType, x, y, data, pid int) bool
 	}
 
 	if targetURL, relX, relY, popupW, popupH, routed := sm.masterExtensionPageRoute(x, y, masterRect); routed {
+		if usesExtensionDOMClickRoute(targetURL, evtType) {
+			return false
+		}
 		windowRoute := popupW > 0 || popupH > 0
 		if evtType == 1 || evtType == 3 {
 			if windowRoute {
@@ -3080,6 +3220,9 @@ func (sm *SyncManager) HandleNativeMouseEvent(evtType, x, y, data, pid int) bool
 	}
 
 	if targetURL, popupX, popupY, popupW, popupH, routed := sm.masterExtensionPopupRoute(x, y, masterRect); routed {
+		if usesExtensionDOMClickRoute(targetURL, evtType) {
+			return false
+		}
 		if evtType == 1 || evtType == 3 {
 			sm.storeExtensionPointerRoute(evtType, nativeExtensionPointerRoute{
 				extensionURL: targetURL,
@@ -3099,17 +3242,12 @@ func (sm *SyncManager) HandleNativeMouseEvent(evtType, x, y, data, pid int) bool
 	}
 
 	// Check bounds (Is it inside Master?)
-	if x >= masterRect.Left && x <= masterRect.Left+masterRect.Width &&
-		y >= masterRect.Top && y <= masterRect.Top+masterRect.Height {
+	if onMasterMainWindow {
 
 		// Calculate Relative
 		relX := float64(x - masterRect.Left)
 		relY := float64(y - masterRect.Top)
-		masterUIOffset := sm.uiOffsetForPID(masterPID)
-		if isChromeTopUIEvent(relY, masterUIOffset) {
-			syncDebugf("[SyncRoute] Chrome top UI mouse handled by target events; coordinate replay skipped y=%.1f offset=%.1f\n", relY, masterUIOffset)
-			return false
-		}
+		masterUIOffset := effectiveChromeTopUIOffset(sm.uiOffsetForPID(masterPID))
 		if extensionID := extensionIDForPageDismissal(evtType, sm.currentMasterExtensionURL(), relY, masterUIOffset); extensionID != "" {
 			sm.closeAllVisibleExtensionTargets(extensionID, "master-page-click")
 		}
@@ -3127,7 +3265,12 @@ func (sm *SyncManager) HandleNativeMouseEvent(evtType, x, y, data, pid int) bool
 			syncDebugf("[SyncRoute] page mouse ignored: master page route unavailable\n")
 			return false
 		}
-		domClickRoute := usesPageDOMClickRoute(masterTargetURL, relY, masterUIOffset)
+		domClickRoute := usesPageDOMClickRoute(
+			masterTargetURL,
+			relY,
+			masterUIOffset,
+			masterCDP.domClickReady(masterSessionID),
+		)
 		if evtType == 1 && relY > masterUIOffset {
 			sm.touchViewportClick(masterTargetID, !domClickRoute)
 		}
@@ -3475,6 +3618,8 @@ func (sm *SyncManager) MapProgrammaticPageTargets(masterTargetID, targetURL stri
 	sm.targetMapMutex.Lock()
 	sm.targetMap[masterTargetID] = mapped
 	sm.targetMapMutex.Unlock()
+	sm.resetPageInputRoute()
+	sm.CancelProgrammaticMasterTarget()
 	syncDebugf("[TabRoute] mapped programmatic target master=%s slaves=%d\n", masterTargetID, len(mapped))
 	return nil
 }
@@ -3488,7 +3633,11 @@ func (sm *SyncManager) RefreshPageTargetMappings(preferredTargetIDs map[int]stri
 	if !running {
 		return nil
 	}
-	return sm.mapInitialTargets(preferredTargetIDs)
+	if err := sm.mapInitialTargets(preferredTargetIDs); err != nil {
+		return err
+	}
+	sm.CancelProgrammaticMasterTarget()
+	return nil
 }
 
 func browserTabByTargetID(tabs []browserTabDescriptor, targetID string) (browserTabDescriptor, bool) {
@@ -3619,7 +3768,16 @@ func (sm *SyncManager) mapInitialTargets(preferredTargetIDs map[int]string) erro
 	if err != nil {
 		return fmt.Errorf("master active target selection failed: %w", err)
 	}
-	masterCDP.applyBrowserTab(masterActive)
+
+	type selectedSlaveTab struct {
+		cdp *CDPClient
+		tab browserTabDescriptor
+	}
+	selectedSlaves := make(map[int]selectedSlaveTab, len(slaves))
+	refreshedMap := make(map[string]map[int]string, len(masterTabs))
+	for _, masterTab := range masterTabs {
+		refreshedMap[masterTab.TargetID] = make(map[int]string)
+	}
 
 	for slavePID, slaveCDP := range slaves {
 		slaveTabs, err := slaveCDP.browserTabsSnapshot()
@@ -3638,29 +3796,34 @@ func (sm *SyncManager) mapInitialTargets(preferredTargetIDs map[int]string) erro
 		if err != nil {
 			return fmt.Errorf("slave PID %d active target selection failed: %w", slavePID, err)
 		}
-		slaveCDP.applyBrowserTab(slaveActive)
+		selectedSlaves[slavePID] = selectedSlaveTab{cdp: slaveCDP, tab: slaveActive}
 		for _, masterTab := range masterTabs {
 			slaveTab, ok := browserTabByIndex(slaveTabs, masterTab.Index)
 			if !ok {
 				continue
 			}
-			sm.targetMapMutex.Lock()
-			if _, ok := sm.targetMap[masterTab.TargetID]; !ok {
-				sm.targetMap[masterTab.TargetID] = make(map[int]string)
-			}
-			sm.targetMap[masterTab.TargetID][slavePID] = slaveTab.TargetID
-			sm.targetMapMutex.Unlock()
+			refreshedMap[masterTab.TargetID][slavePID] = slaveTab.TargetID
 			syncDebugf("[TabRoute] mapped initial index=%d master=%s slavePID=%d slave=%s\n", masterTab.Index, masterTab.TargetID, slavePID, slaveTab.TargetID)
 		}
 		// The visible pair is authoritative even when the windows started with
 		// different background-tab counts.
-		sm.targetMapMutex.Lock()
-		if _, ok := sm.targetMap[masterActive.TargetID]; !ok {
-			sm.targetMap[masterActive.TargetID] = make(map[int]string)
-		}
-		sm.targetMap[masterActive.TargetID][slavePID] = slaveActive.TargetID
-		sm.targetMapMutex.Unlock()
+		refreshedMap[masterActive.TargetID][slavePID] = slaveActive.TargetID
 	}
+
+	// Publish current page mappings before active-session callbacks can observe
+	// them. Other entries may belong to a still-open extension target and must
+	// survive a page-only tab operation.
+	sm.targetMapMutex.Lock()
+	for masterTargetID, slaveMap := range refreshedMap {
+		sm.targetMap[masterTargetID] = slaveMap
+	}
+	sm.targetMapMutex.Unlock()
+
+	masterCDP.applyBrowserTab(masterActive)
+	for _, selected := range selectedSlaves {
+		selected.cdp.applyBrowserTab(selected.tab)
+	}
+	sm.resetPageInputRoute()
 	return nil
 }
 

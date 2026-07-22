@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,26 @@ import (
 )
 
 var cdpDebugLogs = strings.EqualFold(os.Getenv("CHROMEMANAGER_DEBUG"), "1") || strings.EqualFold(os.Getenv("CHROMEMANAGER_DEBUG"), "true")
+
+const declaredExtensionPopupScript = `(async()=>{
+	const manifest=chrome.runtime.getManifest();
+	const defaultPopup=manifest.action&&manifest.action.default_popup;
+	if(!defaultPopup||!chrome.action||!chrome.action.openPopup) throw new Error("declared action popup unavailable");
+	const tabs=chrome.tabs&&chrome.tabs.query?await chrome.tabs.query({active:true}):[];
+	const activeURL=%s;
+	const tab=(tabs||[]).find(item=>item.url===activeURL)||(tabs&&tabs[0]);
+	if(!tab||tab.id===undefined||tab.id===null) throw new Error("active extension tab unavailable");
+	let currentPopup="";
+	if(chrome.action.getPopup){
+	  try{ currentPopup=await chrome.action.getPopup({tabId:tab.id}); }catch(e){}
+	}
+	if(!currentPopup){
+	  if(!chrome.action.setPopup) throw new Error("chrome.action.setPopup unavailable");
+	  await chrome.action.setPopup({tabId:tab.id,popup:defaultPopup});
+	}
+	await chrome.action.openPopup();
+	return defaultPopup;
+})()`
 
 func cdpDebugf(format string, args ...interface{}) {
 	if cdpDebugLogs {
@@ -30,6 +51,7 @@ func cdpDebugf(format string, args ...interface{}) {
 // It supports Session Flattening (Target.setAutoAttach) to handle multiple tabs/pages.
 type CDPClient struct {
 	debugPort     int
+	userDataDir   string
 	wsURL         string
 	ws            *websocket.Conn
 	wsWriteMu     sync.Mutex
@@ -44,6 +66,7 @@ type CDPClient struct {
 	lastActivePageSessionID string
 	sessions                map[string]bool   // Set of active sessions
 	sessionURLs             map[string]string // sessionId -> url
+	sessionCommittedURLs    map[string]string // sessionId -> last top-frame committed url
 	sessionTargets          map[string]string // sessionId -> targetId
 	sessionTypes            map[string]string // sessionId -> target type
 	sessionLoaderIDs        map[string]string // sessionId -> top frame loaderId
@@ -64,9 +87,6 @@ type CDPClient struct {
 	lastVisibleExtensionURL      string
 	lastVisibleExtensionTargetID string
 	viewportMetricsBySession     map[string]CDPViewportMetrics
-
-	extensionPanelBehaviorMu       sync.Mutex
-	extensionPanelBehaviorOriginal map[string]bool
 
 	// Request Coordination
 	pendingRequests map[int]chan map[string]interface{}
@@ -247,7 +267,8 @@ func extensionPopupID(targetURL string) (string, bool) {
 	}
 	if !strings.Contains(path, "popup") &&
 		!strings.Contains(path, "sidepanel") &&
-		base != "index.html" {
+		base != "index.html" &&
+		base != "notification.html" {
 		return "", false
 	}
 	return parts[0], true
@@ -433,23 +454,27 @@ func extensionScopeFromWorkerURL(url string) string {
 // NewCDPClient creates a new CDP client
 func NewCDPClient(debugPort int) *CDPClient {
 	return &CDPClient{
-		debugPort:                      debugPort,
-		sessions:                       make(map[string]bool),
-		sessionURLs:                    make(map[string]string),
-		sessionTargets:                 make(map[string]string),
-		sessionTypes:                   make(map[string]string),
-		sessionLoaderIDs:               make(map[string]string),
-		targetSessions:                 make(map[string]string),
-		knownPageTargets:               make(map[string]bool),
-		targets:                        make(map[string]string),
-		destroyedTargets:               make(map[string]time.Time),
-		pendingRequests:                make(map[int]chan map[string]interface{}),
-		targetEvents:                   make(chan struct{}, 1),
-		extensionPanelBehaviorOriginal: make(map[string]bool),
-		viewportMetricsBySession:       make(map[string]CDPViewportMetrics),
-		domClickSessions:               make(map[string]bool),
-		tabVisibilitySessions:          make(map[string]bool),
+		debugPort:                debugPort,
+		sessions:                 make(map[string]bool),
+		sessionURLs:              make(map[string]string),
+		sessionCommittedURLs:     make(map[string]string),
+		sessionTargets:           make(map[string]string),
+		sessionTypes:             make(map[string]string),
+		sessionLoaderIDs:         make(map[string]string),
+		targetSessions:           make(map[string]string),
+		knownPageTargets:         make(map[string]bool),
+		targets:                  make(map[string]string),
+		destroyedTargets:         make(map[string]time.Time),
+		pendingRequests:          make(map[int]chan map[string]interface{}),
+		targetEvents:             make(chan struct{}, 1),
+		viewportMetricsBySession: make(map[string]CDPViewportMetrics),
+		domClickSessions:         make(map[string]bool),
+		tabVisibilitySessions:    make(map[string]bool),
 	}
+}
+
+func (c *CDPClient) setUserDataDir(userDataDir string) {
+	c.userDataDir = strings.TrimSpace(userDataDir)
 }
 
 func (c *CDPClient) signalTargetEvent() {
@@ -480,6 +505,27 @@ func (c *CDPClient) activeRouteSnapshot() (targetID, sessionID, targetURL string
 		return "", "", ""
 	}
 	return targetID, sessionID, targetURL
+}
+
+func (c *CDPClient) pageRouteForDOMClick(sessionID, sourceURL string) (targetID, routeSessionID string) {
+	if sessionID == "" || sourceURL == "" {
+		return "", ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	targetURL := c.sessionURLs[sessionID]
+	targetID = c.sessionTargets[sessionID]
+	if targetID == "" || !isActivePageTarget(c.sessionTypes[sessionID], targetURL) ||
+		!sameComparableURL(targetURL, sourceURL) {
+		return "", ""
+	}
+
+	// The DOM binding only reports trusted pointer events. The callback session
+	// is therefore authoritative when Chrome's tab-visibility update arrives
+	// slightly later than the first click in a newly opened tab.
+	c.setActiveSessionLocked(sessionID, targetURL)
+	return targetID, sessionID
 }
 
 func (c *CDPClient) GetViewportMetrics() (CDPViewportMetrics, error) {
@@ -805,6 +851,7 @@ const tabVisibilityScript = `(() => {
 })()`
 
 const domClickBinding = "chromeManagerDOMClick"
+const domClickWorld = "ChromeManagerDOMClick"
 
 const domClickCaptureScript = `(() => {
   if (typeof globalThis.__chromeManagerDOMClickHandler === "function") {
@@ -948,12 +995,17 @@ func (c *CDPClient) installDOMClickBinding(sessionID string) {
 		return
 	}
 	c.mu.Lock()
-	enabled := c.OnDOMClick != nil && supportsDOMClickBinding(c.sessionTypes[sessionID], c.sessionURLs[sessionID])
+	targetURL := c.sessionURLs[sessionID]
+	enabled := c.OnDOMClick != nil && supportsDOMClickBinding(c.sessionTypes[sessionID], targetURL)
 	if !enabled {
 		delete(c.domClickSessions, sessionID)
 	}
 	c.mu.Unlock()
 	if !enabled {
+		return
+	}
+	if isExtensionURL(targetURL) {
+		c.installExtensionDOMClickBinding(sessionID, targetURL)
 		return
 	}
 	if _, err := c.callCommand("Runtime.enable", nil, sessionID, 2*time.Second); err != nil {
@@ -968,6 +1020,68 @@ func (c *CDPClient) installDOMClickBinding(sessionID string) {
 		"returnByValue": true,
 	}, sessionID, 2*time.Second)
 	if err != nil || extensionInputEvaluationError(result) != nil {
+		return
+	}
+	c.mu.Lock()
+	c.domClickSessions[sessionID] = true
+	c.mu.Unlock()
+}
+
+func (c *CDPClient) installExtensionDOMClickBinding(sessionID string, targetURL string) {
+	const commandTimeout = 2 * time.Second
+	if _, err := c.callCommand("Runtime.enable", nil, sessionID, commandTimeout); err != nil {
+		cdpDebugf("[DOMClick] extension Runtime.enable failed url=%s: %v\n", targetURL, err)
+		return
+	}
+	if _, err := c.callCommand("Runtime.addBinding", map[string]interface{}{
+		"name":                 domClickBinding,
+		"executionContextName": domClickWorld,
+	}, sessionID, commandTimeout); err != nil {
+		cdpDebugf("[DOMClick] extension Runtime.addBinding failed url=%s: %v\n", targetURL, err)
+		return
+	}
+	if _, err := c.callCommand("Page.addScriptToEvaluateOnNewDocument", map[string]interface{}{
+		"source":    domClickCaptureScript,
+		"worldName": domClickWorld,
+	}, sessionID, commandTimeout); err != nil {
+		cdpDebugf("[DOMClick] extension addScript failed url=%s: %v\n", targetURL, err)
+	}
+	frameTree, err := c.callCommand("Page.getFrameTree", nil, sessionID, commandTimeout)
+	if err != nil {
+		cdpDebugf("[DOMClick] extension Page.getFrameTree failed url=%s: %v\n", targetURL, err)
+		return
+	}
+
+	installed := 0
+	for _, frameID := range extensionInputFrameIDs(frameTree) {
+		world, err := c.callCommand("Page.createIsolatedWorld", map[string]interface{}{
+			"frameId":             frameID,
+			"worldName":           domClickWorld,
+			"grantUniveralAccess": true,
+		}, sessionID, commandTimeout)
+		if err != nil {
+			cdpDebugf("[DOMClick] extension create isolated world failed url=%s frame=%s: %v\n", targetURL, frameID, err)
+			continue
+		}
+		contextID := world["executionContextId"]
+		if contextID == nil {
+			continue
+		}
+		evalResult, err := c.callCommand("Runtime.evaluate", map[string]interface{}{
+			"expression": domClickCaptureScript,
+			"contextId":  contextID,
+		}, sessionID, commandTimeout)
+		if err == nil {
+			err = extensionInputEvaluationError(evalResult)
+		}
+		if err != nil {
+			cdpDebugf("[DOMClick] extension isolated script failed url=%s frame=%s: %v\n", targetURL, frameID, err)
+			continue
+		}
+		installed++
+	}
+	if installed == 0 {
+		cdpDebugf("[DOMClick] no isolated binding installed url=%s session=%s\n", targetURL, sessionID)
 		return
 	}
 	c.mu.Lock()
@@ -1312,6 +1426,7 @@ func (c *CDPClient) handleMessage(msg map[string]interface{}) {
 					return
 				}
 				c.sessionURLs[sessID] = targetURL
+				c.sessionCommittedURLs[sessID] = targetURL
 				c.sessionTargets[sessID] = targetId
 				c.sessionTypes[sessID] = targetType
 				c.targetSessions[targetId] = sessID
@@ -1547,6 +1662,7 @@ func (c *CDPClient) handleMessage(msg map[string]interface{}) {
 				}
 				delete(c.sessions, sessionID)
 				delete(c.sessionURLs, sessionID)
+				delete(c.sessionCommittedURLs, sessionID)
 				delete(c.sessionTargets, sessionID)
 				delete(c.sessionTypes, sessionID)
 				delete(c.sessionLoaderIDs, sessionID)
@@ -1571,6 +1687,7 @@ func (c *CDPClient) handleMessage(msg map[string]interface{}) {
 			c.mu.Lock()
 			delete(c.sessions, sessID)
 			delete(c.sessionURLs, sessID)
+			delete(c.sessionCommittedURLs, sessID)
 			targetID := c.sessionTargets[sessID]
 			delete(c.sessionTargets, sessID)
 			delete(c.sessionTypes, sessID)
@@ -1613,8 +1730,16 @@ func (c *CDPClient) handleMessage(msg map[string]interface{}) {
 			c.mu.Lock()
 			targetID := c.sessionTargets[sessID]
 			targetURL := c.sessionURLs[sessID]
+			targetType := c.sessionTypes[sessID]
+			domClickReady := c.domClickSessions[sessID]
 			loadedCallback := c.OnTargetLoaded
 			c.mu.Unlock()
+			if !domClickReady && supportsDOMClickBinding("page", targetURL) {
+				go c.installDOMClickBinding(sessID)
+			}
+			if isActivePageTarget(targetType, targetURL) {
+				go c.installTabVisibilityBinding(sessID)
+			}
 			if loadedCallback != nil {
 				loadedCallback(targetID, targetURL)
 			}
@@ -1627,10 +1752,14 @@ func (c *CDPClient) handleMessage(msg map[string]interface{}) {
 					if sessID, ok := msg["sessionId"].(string); ok {
 						loaderID, _ := frame["loaderId"].(string)
 						c.mu.Lock()
-						previousURL := c.sessionURLs[sessID]
+						previousURL := c.sessionCommittedURLs[sessID]
+						if previousURL == "" {
+							previousURL = c.sessionURLs[sessID]
+						}
 						previousLoaderID := c.sessionLoaderIDs[sessID]
 						initialized := c.isInitialized
 						c.sessionURLs[sessID] = url
+						c.sessionCommittedURLs[sessID] = url
 						delete(c.domClickSessions, sessID)
 						delete(c.viewportMetricsBySession, sessID)
 						if loaderID != "" {
@@ -1656,7 +1785,9 @@ func (c *CDPClient) handleMessage(msg map[string]interface{}) {
 							previousURL == url &&
 							!isBlankTargetURL(url) &&
 							!isIgnoredCDPTargetURL(url) &&
-							(loaderID == "" || previousLoaderID == "" || loaderID != previousLoaderID) {
+							loaderID != "" &&
+							previousLoaderID != "" &&
+							loaderID != previousLoaderID {
 							go reloadCallback(sessID, url)
 						}
 						_, isExtensionPopup := extensionPopupID(url)
@@ -1808,8 +1939,6 @@ func (c *CDPClient) callCommand(method string, params map[string]interface{}, se
 
 // Close closes the connection
 func (c *CDPClient) Close() {
-	c.restoreExtensionActionPopupBehavior()
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.ws != nil {
@@ -2611,6 +2740,12 @@ func (c *CDPClient) ensureExtensionAvailableForAction(extensionID string) error 
 	if c.hasExtensionTarget(extensionID) {
 		return nil
 	}
+	if c.userDataDir != "" {
+		if c.hasInstalledExtensionOnDisk(extensionID) {
+			return nil
+		}
+		return fmt.Errorf("extension %s is not installed in %s", extensionID, c.userDataDir)
+	}
 
 	// A dormant MV3 extension may have no runtime target. Probe one impossible
 	// storage key so missing extensions are rejected before triggerAction, whose
@@ -2624,6 +2759,22 @@ func (c *CDPClient) ensureExtensionAvailableForAction(extensionID string) error 
 		return fmt.Errorf("extension %s is not installed or enabled: %w", extensionID, err)
 	}
 	return nil
+}
+
+func (c *CDPClient) hasInstalledExtensionOnDisk(extensionID string) bool {
+	if extensionID == "" || c.userDataDir == "" {
+		return false
+	}
+	for _, extensionDir := range []string{
+		filepath.Join(c.userDataDir, "Default", "Extensions", extensionID),
+		filepath.Join(c.userDataDir, "Extensions", extensionID),
+	} {
+		info, err := os.Stat(extensionDir)
+		if err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *CDPClient) hasKnownExtensionTarget(extensionID string) bool {
@@ -2757,112 +2908,6 @@ func (c *CDPClient) triggerExtensionAction(extensionID string) error {
 		"targetId": targetID,
 	}, "", 2*time.Second)
 	return err
-}
-
-func (c *CDPClient) prepareExtensionActionPopupBehavior() int {
-	targets, err := c.getExtensionRuntimeTargets()
-	if err != nil {
-		return 0
-	}
-
-	changed := 0
-	for _, target := range targets {
-		if c.prepareExtensionActionPopupBehaviorForTarget(target) {
-			changed++
-		}
-	}
-	return changed
-}
-
-func (c *CDPClient) prepareExtensionActionPopupBehaviorForID(extensionID string) bool {
-	target, err := c.getExtensionRuntimeTarget(extensionID)
-	if err != nil {
-		return false
-	}
-	return c.prepareExtensionActionPopupBehaviorForTarget(target)
-}
-
-func (c *CDPClient) prepareExtensionActionPopupBehaviorForTarget(target extensionRuntimeTarget) bool {
-	if target.extensionID == "" || target.targetID == "" {
-		return false
-	}
-	sessionID, err := c.ensureTargetAttached(target.targetID, target.targetType, target.targetURL)
-	if err != nil {
-		return false
-	}
-	_, _ = c.callCommand("Runtime.enable", nil, sessionID, 2*time.Second)
-	evalResp, err := c.callCommand("Runtime.evaluate", map[string]interface{}{
-		"expression": `(async()=>{
-const out={hasActionPopup:false,hasSidePanel:false,previous:null,changed:false};
-const manifest=chrome.runtime.getManifest();
-out.hasActionPopup=!!(manifest.action&&manifest.action.default_popup);
-out.hasSidePanel=!!(chrome.sidePanel&&chrome.sidePanel.getPanelBehavior&&chrome.sidePanel.setPanelBehavior);
-if(!out.hasActionPopup||!out.hasSidePanel) return JSON.stringify(out);
-const behavior=await chrome.sidePanel.getPanelBehavior();
-out.previous=!!behavior.openPanelOnActionClick;
-if(out.previous){
-  await chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:false});
-  out.changed=true;
-}
-return JSON.stringify(out);
-})()`,
-		"awaitPromise":  true,
-		"returnByValue": true,
-	}, sessionID, 3*time.Second)
-	if err != nil {
-		return false
-	}
-	if _, ok := evalResp["exceptionDetails"]; ok {
-		return false
-	}
-
-	result, _ := evalResp["result"].(map[string]interface{})
-	value, _ := result["value"].(string)
-	var parsed struct {
-		Previous *bool `json:"previous"`
-		Changed  bool  `json:"changed"`
-	}
-	if err := json.Unmarshal([]byte(value), &parsed); err != nil {
-		return false
-	}
-	if parsed.Previous != nil {
-		c.extensionPanelBehaviorMu.Lock()
-		if c.extensionPanelBehaviorOriginal == nil {
-			c.extensionPanelBehaviorOriginal = make(map[string]bool)
-		}
-		if _, exists := c.extensionPanelBehaviorOriginal[target.extensionID]; !exists {
-			c.extensionPanelBehaviorOriginal[target.extensionID] = *parsed.Previous
-		}
-		c.extensionPanelBehaviorMu.Unlock()
-	}
-	return parsed.Changed
-}
-
-func (c *CDPClient) restoreExtensionActionPopupBehavior() {
-	c.extensionPanelBehaviorMu.Lock()
-	originals := make(map[string]bool, len(c.extensionPanelBehaviorOriginal))
-	for extensionID, previous := range c.extensionPanelBehaviorOriginal {
-		originals[extensionID] = previous
-	}
-	c.extensionPanelBehaviorOriginal = make(map[string]bool)
-	c.extensionPanelBehaviorMu.Unlock()
-
-	for extensionID, previous := range originals {
-		target, err := c.getExtensionRuntimeTarget(extensionID)
-		if err != nil {
-			continue
-		}
-		sessionID, err := c.ensureTargetAttached(target.targetID, target.targetType, target.targetURL)
-		if err != nil {
-			continue
-		}
-		_, _ = c.callCommand("Runtime.enable", nil, sessionID, 2*time.Second)
-		_, _ = c.callCommand("Runtime.evaluate", map[string]interface{}{
-			"expression":    fmt.Sprintf(`(async()=>{ if(chrome.sidePanel&&chrome.sidePanel.setPanelBehavior) await chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:%t}); })()`, previous),
-			"awaitPromise":  true,
-			"returnByValue": true,
-		}, sessionID, 2*time.Second)
-	}
 }
 
 func (c *CDPClient) extensionPopupTargets(extensionID string) []extensionRuntimeTarget {
@@ -3032,7 +3077,7 @@ func (c *CDPClient) waitForVisibleExtensionTarget(extensionID string, timeout ti
 	}
 }
 
-func (c *CDPClient) openExtensionPopupFromRuntime(extensionID string) (string, error) {
+func (c *CDPClient) openDeclaredExtensionPopup(extensionID string) (string, error) {
 	tabTargetID := c.findTabTargetForActivation()
 	if tabTargetID == "" {
 		return "", fmt.Errorf("no active tab target for extension popup")
@@ -3043,48 +3088,39 @@ func (c *CDPClient) openExtensionPopupFromRuntime(extensionID string) (string, e
 		return "", fmt.Errorf("activate extension tab target: %w", err)
 	}
 
-	target, err := c.getExtensionRuntimeTarget(extensionID)
+	runtimeTarget, err := c.getExtensionRuntimeTarget(extensionID)
 	if err != nil {
 		return "", err
 	}
-	sessionID, err := c.ensureTargetAttached(target.targetID, target.targetType, target.targetURL)
+	sessionID, err := c.ensureTargetAttached(runtimeTarget.targetID, runtimeTarget.targetType, runtimeTarget.targetURL)
 	if err != nil {
 		return "", err
 	}
-
 	_, _ = c.callCommand("Runtime.enable", nil, sessionID, 2*time.Second)
-	evalResp, err := c.callCommand("Runtime.evaluate", map[string]interface{}{
-		"expression": `(async()=>{
-	const manifest=chrome.runtime.getManifest();
-	const defaultPopup=manifest.action&&manifest.action.default_popup;
-	if(defaultPopup&&chrome.action&&chrome.action.setPopup&&chrome.tabs&&chrome.tabs.query){
-	  const tabs=await chrome.tabs.query({active:true,currentWindow:true});
-	  const tab=tabs&&tabs[0];
-	  if(tab&&tab.id!==undefined&&tab.id!==null){
-	    let currentPopup="";
-	    if(chrome.action.getPopup){
-	      try{ currentPopup=await chrome.action.getPopup({tabId:tab.id}); }catch(e){}
-	    }
-	    if(!currentPopup) await chrome.action.setPopup({tabId:tab.id,popup:defaultPopup});
-	  }
+
+	activeURL := ""
+	if pageSessionID := c.findPageSessionForActivation(); pageSessionID != "" {
+		c.mu.Lock()
+		activeURL = c.sessionURLs[pageSessionID]
+		c.mu.Unlock()
 	}
-	if(!chrome.action||!chrome.action.openPopup) throw new Error("chrome.action.openPopup unavailable");
-	await chrome.action.openPopup();
-	return "OPENED";
-})()`,
+	activeURLJSON, _ := json.Marshal(activeURL)
+	evalResp, err := c.callCommand("Runtime.evaluate", map[string]interface{}{
+		"expression":    fmt.Sprintf(declaredExtensionPopupScript, string(activeURLJSON)),
 		"awaitPromise":  true,
 		"returnByValue": true,
 		"userGesture":   true,
 	}, sessionID, 3*time.Second)
 	if err != nil {
-		return "", fmt.Errorf("runtime.evaluate openPopup failed: %w", err)
+		return "", fmt.Errorf("open declared extension popup: %w", err)
 	}
 	if exception, ok := evalResp["exceptionDetails"]; ok {
-		return "", fmt.Errorf("chrome.action.openPopup exception: %v", exception)
+		return "", fmt.Errorf("open declared extension popup exception: %v", exception)
 	}
-	visibleTarget, ok := c.waitForVisibleExtensionTarget(extensionID, 1800*time.Millisecond)
+
+	visibleTarget, ok := c.waitForVisibleExtensionTarget(extensionID, 1500*time.Millisecond)
 	if !ok {
-		return "", fmt.Errorf("extension popup not visible after chrome.action.openPopup")
+		return "", fmt.Errorf("declared extension popup did not become visible")
 	}
 	return visibleTarget.targetID, nil
 }
@@ -3102,78 +3138,13 @@ func (c *CDPClient) openExtensionActionPopup(extensionID string) (string, error)
 		return target.targetID, nil
 	}
 
-	c.prepareExtensionActionPopupBehaviorForID(extensionID)
-
-	triggerErr := c.triggerExtensionAction(extensionID)
-	if triggerErr == nil {
-		if target, ok := c.waitForVisibleExtensionTarget(extensionID, 800*time.Millisecond); ok {
-			return target.targetID, nil
-		}
-		// Some MV3 extensions (notably Phantom) acknowledge triggerAction but only
-		// wake their service worker. Open the declared action popup directly once.
-		return c.openExtensionPopupFromRuntime(extensionID)
-	}
-
-	// Extensions.triggerAction may reject actions whose manifest still points to
-	// a side panel. Configure its declared action popup once, then trigger once.
-	target, err := c.getExtensionRuntimeTarget(extensionID)
-	if err != nil {
-		return "", fmt.Errorf("Extensions.triggerAction failed: %v; %w", triggerErr, err)
-	}
-	sessionID, err := c.ensureTargetAttached(target.targetID, target.targetType, target.targetURL)
-	if err != nil {
-		return "", err
-	}
-
-	_, _ = c.callCommand("Runtime.enable", nil, sessionID, 2*time.Second)
-	activeURL := ""
-	if pageSessionID := c.findPageSessionForActivation(); pageSessionID != "" {
-		c.mu.Lock()
-		activeURL = c.sessionURLs[pageSessionID]
-		c.mu.Unlock()
-	}
-	activeURLJSON, _ := json.Marshal(activeURL)
-	evalResp, err := c.callCommand("Runtime.evaluate", map[string]interface{}{
-		"expression": fmt.Sprintf(`(async()=>{
-	const manifest=chrome.runtime.getManifest();
-	const defaultPopup=manifest.action&&manifest.action.default_popup;
-	if(!defaultPopup||!chrome.action||!chrome.action.setPopup) throw new Error("default action popup unavailable");
-	let tabId;
-	if(chrome.tabs&&chrome.tabs.query){
-	  const tabs=await chrome.tabs.query({active:true});
-	  const activeURL=%s;
-	  const tab=(tabs||[]).find(item=>item.url===activeURL)||(tabs&&tabs[0]);
-	  tabId=tab&&tab.id;
-	}
-	if(tabId!==undefined&&tabId!==null){
-	  let currentPopup="";
-	  if(chrome.action.getPopup){
-	    try{ currentPopup=await chrome.action.getPopup({tabId}); }catch(e){}
-	  }
-	  if(!currentPopup) await chrome.action.setPopup({tabId,popup:defaultPopup});
-	}else{
-	  await chrome.action.setPopup({popup:defaultPopup});
-	}
-	return "POPUP_CONFIGURED";
-})()`, string(activeURLJSON)),
-		"awaitPromise":  true,
-		"returnByValue": true,
-		"userGesture":   true,
-	}, sessionID, 3*time.Second)
-	if err != nil {
-		return "", fmt.Errorf("runtime.evaluate configure popup failed: %w", err)
-	}
-	if exception, ok := evalResp["exceptionDetails"]; ok {
-		return "", fmt.Errorf("configure extension popup exception: %v", exception)
-	}
 	if err := c.triggerExtensionAction(extensionID); err != nil {
-		return "", fmt.Errorf("Extensions.triggerAction failed after popup configuration: %w", err)
+		return "", fmt.Errorf("Extensions.triggerAction failed: %w", err)
 	}
-	visibleTarget, ok := c.waitForVisibleExtensionTarget(extensionID, 2500*time.Millisecond)
-	if !ok {
-		return "", fmt.Errorf("extension popup not visible after configured action trigger")
+	if visibleTarget, ok := c.waitForVisibleExtensionTarget(extensionID, 750*time.Millisecond); ok {
+		return visibleTarget.targetID, nil
 	}
-	return visibleTarget.targetID, nil
+	return c.openDeclaredExtensionPopup(extensionID)
 }
 
 func cdpModifiersFromEventFlags(modifiers int) int {
@@ -3339,14 +3310,12 @@ func (c *CDPClient) DispatchDOMClickToSession(sessionID string, action DOMClickA
 		const top = document.elementFromPoint(x, y);
 		return top === candidate || candidate.contains(top);
 	};
-	if (!hittable(element)) {
-		try { element.scrollIntoView({block: "center", inline: "nearest"}); } catch (_) {}
-	}
 	if (!element.isConnected) element = semanticElement();
 	if (!element) return {ok: false, reason: "target-detached"};
 	const rect = element.getBoundingClientRect();
 	if (rect.width <= 0 || rect.height <= 0) return {ok: false, reason: "target-hidden"};
 	if (!hittable(element)) {
+		try { element.focus({preventScroll: true}); } catch (_) {}
 		element.click();
 		return {ok: true, direct: true};
 	}
