@@ -138,10 +138,6 @@ type SyncManager struct {
 	domClickMu       sync.Mutex
 	lastDomClickTime time.Time
 
-	extensionInputMu         sync.RWMutex
-	lastExtensionInputURL    string
-	lastExtensionInputTarget time.Time
-
 	// Zoom sync state
 	syncZoomIndex  int
 	syncZoomSeq    int64
@@ -222,25 +218,6 @@ func (sm *SyncManager) hasRecentDomClickHandledSince(since time.Time) bool {
 		return false
 	}
 	return !sm.lastDomClickTime.Before(since.Add(-privilegedDomClickFallbackDelay))
-}
-
-func (sm *SyncManager) rememberExtensionInputTarget(targetURL string) {
-	if targetURL == "" || !isExtensionURL(targetURL) {
-		return
-	}
-	sm.extensionInputMu.Lock()
-	sm.lastExtensionInputURL = targetURL
-	sm.lastExtensionInputTarget = time.Now()
-	sm.extensionInputMu.Unlock()
-}
-
-func (sm *SyncManager) recentExtensionInputTarget() string {
-	sm.extensionInputMu.RLock()
-	defer sm.extensionInputMu.RUnlock()
-	if sm.lastExtensionInputURL == "" || time.Since(sm.lastExtensionInputTarget) > 30*time.Second {
-		return ""
-	}
-	return sm.lastExtensionInputURL
 }
 
 func (sm *SyncManager) shouldSuppressPageClickAfterExtensionPopup(masterURL string, actionJSON string) bool {
@@ -508,10 +485,6 @@ func (sm *SyncManager) Start(masterWindow common.WindowHandle, slaveWindows []co
 	sm.domClickMu.Lock()
 	sm.lastDomClickTime = time.Time{}
 	sm.domClickMu.Unlock()
-	sm.extensionInputMu.Lock()
-	sm.lastExtensionInputURL = ""
-	sm.lastExtensionInputTarget = time.Time{}
-	sm.extensionInputMu.Unlock()
 	sm.extensionPopupMu.Lock()
 	sm.recentExtensionPopups = make(map[string]time.Time)
 	sm.lastExtensionPopupAt = time.Time{}
@@ -687,10 +660,6 @@ func (sm *SyncManager) Stop() error {
 	sm.domClickMu.Lock()
 	sm.lastDomClickTime = time.Time{}
 	sm.domClickMu.Unlock()
-	sm.extensionInputMu.Lock()
-	sm.lastExtensionInputURL = ""
-	sm.lastExtensionInputTarget = time.Time{}
-	sm.extensionInputMu.Unlock()
 	sm.clearClickRoutes()
 	sm.stopCDPTabSync()
 
@@ -956,16 +925,8 @@ func (sm *SyncManager) startCDPTabSync(generation uint64) {
 		actionType := domActionType(actionJSON)
 		if actionType == "click" {
 			sm.markDomClickHandled()
-			if isExtensionURL(masterURL) {
-				sm.rememberExtensionInputTarget(masterURL)
-				return
-			}
 		}
 		if isExtensionURL(masterURL) {
-			switch actionType {
-			case "click", "input":
-				sm.rememberExtensionInputTarget(masterURL)
-			}
 			if actionType == "input" {
 				return
 			}
@@ -2511,13 +2472,8 @@ func (sm *SyncManager) dispatchKeyboardEvent(wParam int, kb KBDLLHOOKSTRUCT, act
 }
 
 func (sm *SyncManager) broadcastExtensionPopupKey(eventType string, vkCode uint32, modifiers int, text string) bool {
-	targetURL := sm.recentExtensionInputTarget()
-	if targetURL == "" {
-		return false
-	}
-
-	extensionID := extensionIDFromURL(targetURL)
 	sm.cdpMu.Lock()
+	masterCDP := sm.masterCDP
 	slavesCDP := make([]*cdpClient, 0, len(sm.slaveCDPs))
 	for _, cdp := range sm.slaveCDPs {
 		if cdp != nil && cdp.isConnected() {
@@ -2525,10 +2481,21 @@ func (sm *SyncManager) broadcastExtensionPopupKey(eventType string, vkCode uint3
 		}
 	}
 	sm.cdpMu.Unlock()
-	if len(slavesCDP) == 0 {
-		return true
+	if masterCDP == nil || !masterCDP.isConnected() || len(slavesCDP) == 0 {
+		return false
 	}
 
+	targetURL := masterCDP.newestVisibleExtensionURL()
+	if targetURL == "" {
+		masterCDP.ensureVisibleExtensionTargetsAttached()
+		targetURL = masterCDP.newestVisibleExtensionURL()
+	}
+	if targetURL == "" {
+		return false
+	}
+	extensionID := extensionIDFromURL(targetURL)
+
+	var dispatched atomic.Bool
 	var wg sync.WaitGroup
 	for _, cdp := range slavesCDP {
 		wg.Add(1)
@@ -2541,11 +2508,13 @@ func (sm *SyncManager) broadcastExtensionPopupKey(eventType string, vkCode uint3
 			if sessionID == "" {
 				return
 			}
-			_ = c.dispatchKeyEventToSession(sessionID, eventType, vkCode, modifiers, text)
+			if err := c.dispatchKeyEventToSession(sessionID, eventType, vkCode, modifiers, text); err == nil {
+				dispatched.Store(true)
+			}
 		}(cdp)
 	}
 	wg.Wait()
-	return true
+	return dispatched.Load()
 }
 
 func (sm *SyncManager) processMouseHook(wParam int, ms MSLLHOOKSTRUCT) {
@@ -2643,16 +2612,9 @@ func (sm *SyncManager) handleMouseClick(route clickRouteState, msg int) {
 
 	// Check if popup
 	if route.isPopup {
-		if sm.syncExtensionPopupMouseByCDP(route, msg, slaves) {
-			return
-		}
 		if sm.isExtensionPopupDomSyncActive(route.sourceWindow) {
-			// Extension popup content is synchronized through DOM/CDP. Replaying
-			// physical mouse messages immediately steals focus from the master popup.
-			// Some extension pages do not expose a usable DOM click hook, so send one
-			// delayed physical fallback only when no DOM click was captured.
 			if isMouseButtonUpMessage(msg) {
-				sm.scheduleExtensionPopupClickFallback(route, msg, slaves)
+				sm.scheduleExtensionPopupPhysicalFallback(route, msg, slaves)
 			}
 			return
 		}
@@ -2755,118 +2717,6 @@ func (sm *SyncManager) isMasterViewportClick(route clickRouteState) bool {
 	return x >= 0 && y >= 0 && x <= masterW && y <= masterH
 }
 
-func (sm *SyncManager) syncExtensionPopupMouseByCDP(route clickRouteState, msg int, slaves []common.WindowHandle) bool {
-	if !route.isPopup || len(slaves) == 0 || sm.isChromeNativeDialogWindow(route.sourceWindow) {
-		return false
-	}
-	eventType, button, ok := cdpMouseEventForWin32(msg)
-	if !ok {
-		return false
-	}
-
-	sm.cdpMu.Lock()
-	masterCDP := sm.masterCDP
-	slaveClients := make([]*cdpClient, 0, len(slaves))
-	for _, slave := range slaves {
-		if cdp := sm.slaveCDPs[uintptr(slave)]; cdp != nil && cdp.isConnected() {
-			slaveClients = append(slaveClients, cdp)
-		}
-	}
-	sm.cdpMu.Unlock()
-	if masterCDP == nil || !masterCDP.isConnected() || len(slaveClients) == 0 {
-		return false
-	}
-
-	masterCDP.ensureVisibleExtensionTargetsAttached()
-	masterURL := masterCDP.newestVisibleExtensionURL()
-	extensionID := extensionIDFromURL(masterURL)
-	if extensionID == "" {
-		return false
-	}
-	sm.rememberExtensionInputTarget(masterURL)
-
-	x := route.relX
-	y := route.relY
-	modifiers := sm.currentCDPMouseModifiers()
-
-	var success int32
-	var wg sync.WaitGroup
-	for _, cdp := range slaveClients {
-		wg.Add(1)
-		go func(client *cdpClient) {
-			defer wg.Done()
-			var sessionID string
-			for i := 0; i < 20; i++ {
-				if i == 0 || i%5 == 0 {
-					client.ensureExtensionTargetsAttached(extensionID)
-				}
-				sessionID = client.findSessionIDByURL(masterURL)
-				if sessionID != "" {
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			if sessionID == "" {
-				return
-			}
-
-			if route.synthetic && isMouseButtonUpMessage(msg) {
-				downMsg, ok := pairedMouseDownMessage(msg)
-				if !ok {
-					return
-				}
-				downType, downButton, ok := cdpMouseEventForWin32(downMsg)
-				if !ok {
-					return
-				}
-				_ = client.dispatchMouseEventToSession(sessionID, "mouseMoved", x, y, "none", modifiers, 0)
-				if err := client.dispatchMouseEventToSession(sessionID, downType, x, y, downButton, modifiers, 0); err != nil {
-					return
-				}
-				time.Sleep(8 * time.Millisecond)
-			} else if eventType == "mousePressed" {
-				_ = client.dispatchMouseEventToSession(sessionID, "mouseMoved", x, y, "none", modifiers, 0)
-			}
-
-			if err := client.dispatchMouseEventToSession(sessionID, eventType, x, y, button, modifiers, 0); err != nil {
-				return
-			}
-			atomic.AddInt32(&success, 1)
-		}(cdp)
-	}
-	wg.Wait()
-	return atomic.LoadInt32(&success) > 0
-}
-
-func cdpMouseEventForWin32(msg int) (eventType string, button string, ok bool) {
-	switch msg {
-	case WM_LBUTTONDOWN:
-		return "mousePressed", "left", true
-	case WM_LBUTTONUP:
-		return "mouseReleased", "left", true
-	case WM_RBUTTONDOWN:
-		return "mousePressed", "right", true
-	case WM_RBUTTONUP:
-		return "mouseReleased", "right", true
-	default:
-		return "", "", false
-	}
-}
-
-func (sm *SyncManager) currentCDPMouseModifiers() int {
-	modifiers := 0
-	if sm.isVirtualKeyPressed(VK_MENU) {
-		modifiers |= 1
-	}
-	if sm.isVirtualKeyPressed(VK_CONTROL) {
-		modifiers |= 2
-	}
-	if sm.isVirtualKeyPressed(VK_SHIFT) {
-		modifiers |= 8
-	}
-	return modifiers
-}
-
 func (sm *SyncManager) masterHasCachedPopup() bool {
 	master := uintptr(sm.masterWindow)
 	if master == 0 {
@@ -2952,40 +2802,60 @@ func (sm *SyncManager) isExtensionPopupDomSyncActive(sourcePopup uintptr) bool {
 	sm.cdpMu.Lock()
 	masterCDP := sm.masterCDP
 	sm.cdpMu.Unlock()
-	if masterCDP == nil {
-		return false
-	}
-	if masterCDP.ensureVisibleExtensionTargetsAttached() {
-		return true
-	}
-	return masterCDP.hasExtensionPopupSession()
+	return masterCDP != nil && masterCDP.hasExtensionPopupSession()
 }
 
-func (sm *SyncManager) scheduleExtensionPopupClickFallback(route clickRouteState, upMsg int, slaves []common.WindowHandle) {
+func (sm *SyncManager) scheduleExtensionPopupPhysicalFallback(route clickRouteState, upMsg int, slaves []common.WindowHandle) {
 	if !isMouseButtonUpMessage(upMsg) || len(slaves) == 0 {
 		return
 	}
 
-	slaveSnapshot := append([]common.WindowHandle(nil), slaves...)
+	sm.mu.RLock()
+	masterWindow := uintptr(sm.masterWindow)
+	isRunning := sm.isRunning
+	sm.mu.RUnlock()
+	if !isRunning || masterWindow == 0 {
+		return
+	}
+
+	targets := make([]uintptr, 0, len(slaves))
+	for _, slave := range slaves {
+		matchingPopup := sm.findMatchingPopup(route.sourceWindow, masterWindow, uintptr(slave))
+		if matchingPopup != 0 {
+			targets = append(targets, matchingPopup)
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+
+	createdAt := route.createdAt
+	relX, relY := route.relX, route.relY
+
 	go func() {
 		time.Sleep(privilegedDomClickFallbackDelay)
-		if sm.hasRecentDomClickHandledSince(route.createdAt) {
+		if sm.hasRecentDomClickHandledSince(createdAt) {
 			return
 		}
 
-		sm.requestPopupSession(popupSessionExtension)
-		sm.refreshPopupCache(true)
+		sm.mu.RLock()
+		stillRunning := sm.isRunning && uintptr(sm.masterWindow) == masterWindow
+		sm.mu.RUnlock()
+		if !stillRunning {
+			return
+		}
 
+		fmt.Printf("[ExtensionPopup] DOM click not captured; using popup HWND fallback targets=%d\n", len(targets))
 		var wg sync.WaitGroup
-		for _, slave := range slaveSnapshot {
+		for _, target := range targets {
 			wg.Add(1)
-			go func(s common.WindowHandle) {
+			go func(hwnd uintptr) {
 				defer wg.Done()
-				matchingPopup := sm.findMatchingPopup(route.sourceWindow, uintptr(sm.masterWindow), uintptr(s))
-				if matchingPopup != 0 {
-					sm.postFullClickSequence(matchingPopup, route.relX, route.relY, upMsg)
+				if !utils.IsWindowValid(hwnd) {
+					return
 				}
-			}(slave)
+				sm.postPopupRenderClickSequence(hwnd, relX, relY, upMsg)
+			}(target)
 		}
 		wg.Wait()
 	}()
@@ -3200,6 +3070,54 @@ func (sm *SyncManager) postFullClickSequence(hwnd uintptr, relX, relY float64, u
 	sm.postMouseMessage(hwnd, downMsg, relX, relY, true)
 	time.Sleep(popupReliableRetryGap)
 	sm.postMouseMessage(hwnd, upMsg, relX, relY, true)
+}
+
+func (sm *SyncManager) postPopupRenderClickSequence(hwnd uintptr, relX, relY float64, upMsg int) {
+	downMsg, ok := pairedMouseDownMessage(upMsg)
+	if !ok {
+		return
+	}
+
+	sm.postPopupRenderMouseMessage(hwnd, downMsg, relX, relY)
+	time.Sleep(popupReliableRetryGap)
+	sm.postPopupRenderMouseMessage(hwnd, upMsg, relX, relY)
+}
+
+func (sm *SyncManager) postPopupRenderMouseMessage(hwnd uintptr, msg int, relX, relY float64) {
+	if hwnd == 0 {
+		return
+	}
+
+	scale := sm.getMonitorScale(hwnd)
+	physX := int32(relX * scale)
+	physY := int32(relY * scale)
+
+	var pt struct{ X, Y int32 }
+	pt.X, pt.Y = physX, physY
+	sm.clientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+
+	var target uintptr
+	screenPoint := uintptr(uint32(pt.X)) | (uintptr(uint32(pt.Y)) << 32)
+	if candidate, _, _ := sm.windowFromPoint.Call(screenPoint); candidate != 0 {
+		root, _, _ := sm.getAncestor.Call(candidate, GA_ROOT)
+		className, err := utils.GetClassName(candidate)
+		if err == nil && root == hwnd && className == "Chrome_RenderWidgetHostHWND" {
+			target = candidate
+		}
+	}
+	if target == 0 {
+		target = sm.findRenderWidgetHostHWND(hwnd)
+	}
+
+	finalX, finalY := physX, physY
+	if target != hwnd {
+		sm.screenToClient.Call(target, uintptr(unsafe.Pointer(&pt)))
+		finalX, finalY = pt.X, pt.Y
+	}
+
+	lparam := uintptr(uint32(finalX)&0xFFFF) | (uintptr(uint32(finalY)&0xFFFF) << 16)
+	sm.postMessage.Call(target, WM_MOUSEMOVE, sm.mouseMessageWParam(WM_MOUSEMOVE), lparam)
+	sm.postMessage.Call(target, uintptr(msg), sm.mouseMessageWParam(msg), lparam)
 }
 
 func (sm *SyncManager) mouseMessageWParam(msg int) uintptr {

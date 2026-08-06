@@ -914,7 +914,8 @@ func (c *cdpClient) handleRuntimeBindingCalled(sessionID string, params map[stri
 		}
 		cdpVerbosef("[DOM ACTION CAPTURE] Received action payload: %s\n", payload)
 		if callback := c.onDomAction; callback != nil {
-			go callback(sessionID, payload)
+			// Handle the binding before the next CDP event can detach a popup session.
+			callback(sessionID, payload)
 		}
 		return
 	}
