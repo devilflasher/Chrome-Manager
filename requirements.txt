@@ -1,9 +1,0 @@
-pyinstaller==6.12.0
-sv-ttk==2.6.0
-keyboard==0.13.5
-mouse==0.7.1
-pywin32==309
-wmi==1.5.1
-requests==2.32.3
-pillow==11.1.0
-win11toast==0.32
