@@ -20,6 +20,8 @@ import (
 
 const cdpVerboseLogging = false
 
+const transientPagePromotionGracePeriod = 200 * time.Millisecond
+
 func cdpVerbosef(format string, args ...interface{}) {
 	if cdpVerboseLogging {
 		fmt.Printf(format, args...)
@@ -38,6 +40,7 @@ type cdpClient struct {
 	initialized         bool
 	pendingRequests     map[int]chan map[string]interface{}
 	knownPageTargets    map[string]bool
+	targetTypes         map[string]string
 	sessionTargets      map[string]string
 	sessionURLs         map[string]string
 	sessionTypes        map[string]string
@@ -69,6 +72,7 @@ func newCDPClient(debugPort int) *cdpClient {
 		debugPort:                      debugPort,
 		pendingRequests:                make(map[int]chan map[string]interface{}),
 		knownPageTargets:               make(map[string]bool),
+		targetTypes:                    make(map[string]string),
 		currentZoom:                    1.0,
 		currentStyleZoom:               1.0,
 		sessionTargets:                 make(map[string]string),
@@ -347,6 +351,12 @@ func (c *cdpClient) handleMessage(msg map[string]interface{}) {
 		timestamp := time.Now().Format("15:04:05.000")
 		cdpVerbosef("[CDP] Target.targetCreated: targetID=%s type=%s url=%s timestamp=%s\n", targetID, targetType, targetURL, timestamp)
 
+		if targetID != "" {
+			c.mu.Lock()
+			c.targetTypes[targetID] = targetType
+			c.mu.Unlock()
+		}
+
 		if !isSupportedTarget(targetType, targetURL) {
 			cdpVerbosef("[CDP] Target.targetCreated: SKIPPED - not supported targetType=%s url=%s\n", targetType, targetURL)
 			return
@@ -382,6 +392,7 @@ func (c *cdpClient) handleMessage(msg map[string]interface{}) {
 		c.mu.Lock()
 		known := c.knownPageTargets[targetID]
 		delete(c.knownPageTargets, targetID)
+		delete(c.targetTypes, targetID)
 		callback := c.onTargetDestroyed
 		c.mu.Unlock()
 
@@ -424,6 +435,7 @@ func (c *cdpClient) handleAttachedToTarget(params map[string]interface{}) {
 	}
 
 	c.mu.Lock()
+	c.targetTypes[targetID] = targetType
 	c.sessionTargets[sessionID] = targetID
 	c.sessionURLs[sessionID] = targetURL
 	c.sessionTypes[sessionID] = targetType
@@ -469,6 +481,8 @@ func (c *cdpClient) handleTargetInfoChanged(params map[string]interface{}) {
 	}
 
 	c.mu.Lock()
+	previousType := c.targetTypes[targetID]
+	c.targetTypes[targetID] = targetType
 	wasKnown := c.knownPageTargets[targetID]
 	sessionID := c.targetSessions[targetID]
 	previousURL := ""
@@ -513,8 +527,29 @@ func (c *cdpClient) handleTargetInfoChanged(params map[string]interface{}) {
 	}
 	_, isExtensionPopup := extensionPopupID(targetURL)
 	if notifyCreated && shouldNotifyTargetCreated(targetType) && !isPrerenderTarget(targetType, targetSubtype) && callback != nil && (initialized || isExtensionPopup) {
+		if isTransientPagePromotion(previousType, targetType, targetURL) {
+			c.notifyTargetCreatedIfStable(targetID, targetURL, callback)
+			return
+		}
 		go callback(targetID, targetURL)
 	}
+}
+
+func isTransientPagePromotion(previousType, targetType, targetURL string) bool {
+	return previousType != "" && previousType != "page" && targetType == "page" && targetURL == ""
+}
+
+func (c *cdpClient) notifyTargetCreatedIfStable(targetID, targetURL string, callback func(string, string)) {
+	go func() {
+		time.Sleep(transientPagePromotionGracePeriod)
+
+		c.mu.Lock()
+		stillPage := c.knownPageTargets[targetID] && c.targetTypes[targetID] == "page"
+		c.mu.Unlock()
+		if stillPage {
+			callback(targetID, targetURL)
+		}
+	}()
 }
 
 func isPlaceholderURL(u string) bool {
