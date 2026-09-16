@@ -5,6 +5,7 @@ go 1.23.0
 toolchain go1.24.3
 
 require (
+	github.com/go-ole/go-ole v1.3.0
 	github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/parsiya/golnk v0.0.0-20221103095132-740a4c27c4ff
@@ -27,7 +28,6 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.6.0 // indirect
 	github.com/go-git/go-git/v5 v5.12.0 // indirect
-	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/uuid v1.4.0 // indirect

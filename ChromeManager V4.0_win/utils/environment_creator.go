@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -78,86 +76,9 @@ func CreateShortcut(shortcutPath, targetPath, arguments, workingDir string) erro
 	targetPath = strings.ReplaceAll(targetPath, "/", "\\")
 	workingDir = strings.ReplaceAll(workingDir, "/", "\\")
 	arguments = strings.ReplaceAll(arguments, "/", "\\")
-	vbsScript := fmt.Sprintf(`
-Set WshShell = CreateObject("WScript.Shell")
-Set Shortcut = WshShell.CreateShortcut("%s")
-Shortcut.TargetPath = "%s"
-Shortcut.Arguments = "%s"
-Shortcut.WorkingDirectory = "%s"
-Shortcut.WindowStyle = 1
-Shortcut.IconLocation = "%s,0"
-Shortcut.Save
-`,
-		strings.ReplaceAll(shortcutPath, `"`, `""`), // 转义双引号
-		strings.ReplaceAll(targetPath, `"`, `""`),   // 转义双引号
-		strings.ReplaceAll(arguments, `"`, `""`),    // 转义双引号
-		strings.ReplaceAll(workingDir, `"`, `""`),   // 转义双引号
-		strings.ReplaceAll(targetPath, `"`, `""`),   // 转义双引号
-	)
-
-	uniqueID := fmt.Sprintf("%d_%d_%p", time.Now().UnixNano(), time.Now().Unix(), &shortcutPath)
-	tempVBS := filepath.Join(os.TempDir(), fmt.Sprintf("create_shortcut_%s.vbs", uniqueID))
-	if err := os.WriteFile(tempVBS, []byte(vbsScript), 0644); err != nil {
-		return fmt.Errorf("create vbs failed: %v", err)
+	if err := createNativeShortcut(shortcutPath, targetPath, arguments, workingDir); err != nil {
+		return err
 	}
-	defer os.Remove(tempVBS)
-	cmd := fmt.Sprintf(`cmd.exe /c cscript.exe //NoLogo "%s"`, tempVBS)
-	kernel32 := windows.NewLazyDLL("kernel32.dll")
-	procCreateProcess := kernel32.NewProc("CreateProcessW")
-
-	var si windows.StartupInfo
-	var pi windows.ProcessInformation
-	si.Cb = uint32(unsafe.Sizeof(si))
-
-	cmdLinePtr, _ := windows.UTF16PtrFromString(cmd)
-
-	const CREATE_NO_WINDOW = 0x08000000
-
-	ret, _, _ := procCreateProcess.Call(
-		0,
-		uintptr(unsafe.Pointer(cmdLinePtr)),
-		0,
-		0,
-		0,
-		CREATE_NO_WINDOW, // 隐藏窗口，静默执行
-		0,
-		0,
-		uintptr(unsafe.Pointer(&si)),
-		uintptr(unsafe.Pointer(&pi)),
-	)
-
-	if ret == 0 {
-		return fmt.Errorf("执行VBScript创建快捷方式失败")
-	}
-
-	// 确保进程句柄被正确关闭
-	defer func() {
-		if pi.Process != 0 {
-			windows.CloseHandle(pi.Process)
-		}
-		if pi.Thread != 0 {
-			windows.CloseHandle(pi.Thread)
-		}
-	}()
-
-	// 等待进程完成，使用更短的超时时间
-	timeoutResult, _ := windows.WaitForSingleObject(pi.Process, 5000)
-
-	var exitCode uint32
-	windows.GetExitCodeProcess(pi.Process, &exitCode)
-
-	if timeoutResult == uint32(windows.WAIT_TIMEOUT) {
-		// 如果超时，强制终止进程
-		windows.TerminateProcess(pi.Process, 1)
-		return fmt.Errorf("VBScript执行超时，已强制终止")
-	}
-
-	if exitCode != 0 {
-		return fmt.Errorf("VBScript执行失败，退出码: %d", exitCode)
-	}
-
-	// 等待一小段时间，确保文件写入完成
-	time.Sleep(100 * time.Millisecond)
 
 	if _, err := os.Stat(shortcutPath); err != nil {
 		return fmt.Errorf("快捷方式文件创建失败: %v", err)
