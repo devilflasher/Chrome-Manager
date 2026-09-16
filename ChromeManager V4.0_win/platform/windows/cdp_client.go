@@ -341,6 +341,7 @@ func (c *cdpClient) handleMessage(msg map[string]interface{}) {
 	case "Target.targetCreated":
 		targetInfo, _ := params["targetInfo"].(map[string]interface{})
 		targetType, _ := targetInfo["type"].(string)
+		targetSubtype, _ := targetInfo["subtype"].(string)
 		targetID, _ := targetInfo["targetId"].(string)
 		targetURL, _ := targetInfo["url"].(string)
 		timestamp := time.Now().Format("15:04:05.000")
@@ -367,7 +368,7 @@ func (c *cdpClient) handleMessage(msg map[string]interface{}) {
 
 		cdpVerbosef("[CDP] Target.targetCreated: callback triggered (initialized=%v callback=%v)\n", initialized, callback != nil)
 		_, isExtensionPopup := extensionPopupID(targetURL)
-		if callback != nil && shouldNotifyTargetCreated(targetType) && (initialized || isExtensionPopup) {
+		if callback != nil && shouldNotifyTargetCreated(targetType) && !isPrerenderTarget(targetType, targetSubtype) && (initialized || isExtensionPopup) {
 			go callback(targetID, targetURL)
 		}
 	case "Target.targetInfoChanged":
@@ -460,6 +461,7 @@ func (c *cdpClient) handleAttachedToTarget(params map[string]interface{}) {
 func (c *cdpClient) handleTargetInfoChanged(params map[string]interface{}) {
 	targetInfo, _ := params["targetInfo"].(map[string]interface{})
 	targetType, _ := targetInfo["type"].(string)
+	targetSubtype, _ := targetInfo["subtype"].(string)
 	targetID, _ := targetInfo["targetId"].(string)
 	targetURL, _ := targetInfo["url"].(string)
 	if targetID == "" {
@@ -510,7 +512,7 @@ func (c *cdpClient) handleTargetInfoChanged(params map[string]interface{}) {
 		go c.installActivationBinding(sessionID)
 	}
 	_, isExtensionPopup := extensionPopupID(targetURL)
-	if notifyCreated && shouldNotifyTargetCreated(targetType) && callback != nil && (initialized || isExtensionPopup) {
+	if notifyCreated && shouldNotifyTargetCreated(targetType) && !isPrerenderTarget(targetType, targetSubtype) && callback != nil && (initialized || isExtensionPopup) {
 		go callback(targetID, targetURL)
 	}
 }
@@ -1035,6 +1037,10 @@ func (c *cdpClient) hasExtensionPopupSession() bool {
 
 func shouldNotifyTargetCreated(targetType string) bool {
 	return targetType == "page" || targetType == "popup"
+}
+
+func isPrerenderTarget(targetType, targetSubtype string) bool {
+	return targetType == "page" && targetSubtype == "prerender"
 }
 
 func isSupportedTarget(targetType string, targetURL string) bool {
