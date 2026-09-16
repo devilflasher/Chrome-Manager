@@ -88,6 +88,7 @@ func NewOptimizedIconManager() (*OptimizedIconManager, error) {
 	iconDir := filepath.Join(execDir, "icons")
 
 	possiblePaths := []string{
+		filepath.Join(execDir, "icons", "chrome.png"),
 		filepath.Join(execDir, "build", "chrome.png"),
 		filepath.Join("build", "chrome.png"),
 		filepath.Join("Old", "icons", "chrome.png"),
@@ -172,7 +173,7 @@ func (im *OptimizedIconManager) GenerateColorIcon(windowNumber int, size int) (s
 		im.iconCache.Remove(cacheKey)
 	}
 
-	if _, err := os.Stat(iconPath); err == nil {
+	if generatedIconIsCurrent(iconPath, im.chromeTemplate) {
 		// 文件存在，添加到缓存
 		if stat, err := os.Stat(iconPath); err == nil {
 			im.iconCache.Put(cacheKey, &CachedIcon{

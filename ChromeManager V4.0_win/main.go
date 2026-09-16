@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,6 +40,9 @@ var assets embed.FS
 
 //go:embed build/appicon.png
 var appIconData []byte
+
+//go:embed build/chrome.png
+var chromeTemplateData []byte
 
 type Settings = config.Settings
 
@@ -263,8 +267,7 @@ func (c *ChromeService) getConfigPath() string {
 	return configPath
 }
 
-// ensureAppIcon 确保应用图标存在于 icons 目录中
-// 如果不存在，则从嵌入的资源中释放出来
+// ensureAppIcon 确保应用图标和窗口图标模板存在于 icons 目录中。
 func ensureAppIcon() (string, error) {
 	// 获取程序所在目录
 	exePath, err := os.Executable()
@@ -291,7 +294,32 @@ func ensureAppIcon() (string, error) {
 		log.Printf("📌 使用已存在的应用图标: %s", iconPath)
 	}
 
+	chromeTemplatePath := filepath.Join(iconsDir, "chrome.png")
+	changed, err := writeEmbeddedFileIfChanged(chromeTemplatePath, chromeTemplateData)
+	if err != nil {
+		return "", fmt.Errorf("写入浏览器图标模板失败: %w", err)
+	}
+	if changed {
+		log.Printf("✅ 已生成浏览器图标模板: %s", chromeTemplatePath)
+	} else {
+		log.Printf("📌 使用已存在的浏览器图标模板: %s", chromeTemplatePath)
+	}
+
 	return iconPath, nil
+}
+
+func writeEmbeddedFileIfChanged(path string, data []byte) (bool, error) {
+	existing, err := os.ReadFile(path)
+	if err == nil && bytes.Equal(existing, data) {
+		return false, nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // 窗口配置常量统一在 config/config.go 中定义

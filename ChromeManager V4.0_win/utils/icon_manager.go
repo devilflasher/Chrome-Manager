@@ -61,13 +61,16 @@ func NewIconManager() (*IconManager, error) {
 	execDir := filepath.Dir(execPath)
 
 	iconDir := filepath.Join(execDir, "icons")
-	chromeTemplate := filepath.Join(execDir, "build", "chrome.png")
+	chromeTemplate := filepath.Join(execDir, "icons", "chrome.png")
 	if _, err := os.Stat(chromeTemplate); errors.Is(err, os.ErrNotExist) {
-		chromeTemplate = filepath.Join("build", "chrome.png")
+		chromeTemplate = filepath.Join(execDir, "build", "chrome.png")
 		if _, err := os.Stat(chromeTemplate); errors.Is(err, os.ErrNotExist) {
-			chromeTemplate = filepath.Join("Old", "icons", "chrome.png")
+			chromeTemplate = filepath.Join("build", "chrome.png")
 			if _, err := os.Stat(chromeTemplate); errors.Is(err, os.ErrNotExist) {
-				chromeTemplate = ""
+				chromeTemplate = filepath.Join("Old", "icons", "chrome.png")
+				if _, err := os.Stat(chromeTemplate); errors.Is(err, os.ErrNotExist) {
+					chromeTemplate = ""
+				}
 			}
 		}
 	}
@@ -110,7 +113,7 @@ func loadArialFont() (*truetype.Font, error) {
 func (im *IconManager) GenerateColorIcon(windowNumber int, size int) (string, error) {
 	iconPath := filepath.Join(im.iconDir, fmt.Sprintf("%d.ico", windowNumber))
 
-	if _, err := os.Stat(iconPath); err == nil {
+	if generatedIconIsCurrent(iconPath, im.chromeTemplate) {
 		return iconPath, nil
 	}
 
