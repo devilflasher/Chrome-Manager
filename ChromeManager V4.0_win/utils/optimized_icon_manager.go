@@ -559,6 +559,10 @@ func (im *OptimizedIconManager) ApplyIconsToWindows(windows []ChromeProcessInfo,
 	windowData := make(map[int]uintptr)
 
 	for _, window := range windows {
+		if window.Number <= 0 {
+			log.Printf("跳过无效窗口编号的图标设置: PID=%d, 编号=%d", window.PID, window.Number)
+			continue
+		}
 		windowNumbers = append(windowNumbers, window.Number)
 		windowData[window.Number] = window.HWND
 	}

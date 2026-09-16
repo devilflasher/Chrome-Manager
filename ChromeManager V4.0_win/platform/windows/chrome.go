@@ -160,9 +160,13 @@ func analyzeChromeProcess(p *process.Process) *ChromeProcessInfo {
 // 从 utils.parseChromeCmdLine 迁移完成 ✅
 func parseChromeCmdLine(cmdline string) (userDataDir string, debugPort int, number int) {
 	// 提取 user-data-dir
-	userDataRegex := regexp.MustCompile(`--user-data-dir[=\s]+"?([^"]+)"?`)
-	if matches := userDataRegex.FindStringSubmatch(cmdline); len(matches) > 1 {
-		userDataDir = strings.Trim(matches[1], `"`)
+	userDataRegex := regexp.MustCompile(`(?i)--user-data-dir(?:=|\s+)(?:"([^"]+)"|([^\s"]+))`)
+	if matches := userDataRegex.FindStringSubmatch(cmdline); len(matches) > 2 {
+		if matches[1] != "" {
+			userDataDir = matches[1]
+		} else {
+			userDataDir = matches[2]
+		}
 		number = extractNumberFromPath(userDataDir)
 	}
 

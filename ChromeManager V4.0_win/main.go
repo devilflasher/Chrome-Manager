@@ -530,6 +530,7 @@ func (c *ChromeService) OpenWindows(windowNumbers string) error {
 	var openedWindows []syncmanager.WindowInfo
 	var notFoundWindows []int
 	var failedWindows []int
+	var failedWindowDetails []string
 	var closingWindows []int
 
 	for _, number := range numbers {
@@ -546,6 +547,7 @@ func (c *ChromeService) OpenWindows(windowNumbers string) error {
 				continue
 			}
 			failedWindows = append(failedWindows, number)
+			failedWindowDetails = append(failedWindowDetails, fmt.Sprintf("窗口 %d: %v", number, err))
 			continue
 		}
 
@@ -573,6 +575,9 @@ func (c *ChromeService) OpenWindows(windowNumbers string) error {
 				errMsg += "; "
 			}
 			errMsg += fmt.Sprintf("启动失败的窗口: %v", failedWindows)
+			if len(failedWindowDetails) > 0 {
+				errMsg += fmt.Sprintf("；首个错误：%s", failedWindowDetails[0])
+			}
 		}
 		return errors.New(errMsg)
 	} else if len(notFoundWindows) > 0 || len(closingWindows) > 0 || len(failedWindows) > 0 {
@@ -587,6 +592,9 @@ func (c *ChromeService) OpenWindows(windowNumbers string) error {
 		}
 		if len(failedWindows) > 0 {
 			warnMsg += fmt.Sprintf("，启动失败: %v", failedWindows)
+			if len(failedWindowDetails) > 0 {
+				warnMsg += fmt.Sprintf("；首个错误：%s", failedWindowDetails[0])
+			}
 		}
 		return errors.New(warnMsg)
 	}
@@ -667,8 +675,22 @@ func (c *ChromeService) launchChromeFromShortcut(shortcut common.ShortcutInfo, s
 	cmd := exec.Command(shortcut.TargetPath, args...)
 	cmd.Dir = shortcut.WorkingDir // 设置工作目录
 
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start Chrome: %v", err)
+	launchTarget := shortcut.TargetPath
+	pid := int32(0)
+	if directErr := cmd.Start(); directErr != nil {
+		fallbackTarget, resolveErr := c.resolveBrowserExecutableForFallback(settings)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("直接启动浏览器失败: %v；查找系统浏览器用于兜底启动也失败: %v", directErr, resolveErr)
+		}
+
+		fallbackWorkingDir := filepath.Dir(fallbackTarget)
+		if shellErr := shellLaunchExecutable(fallbackTarget, newArgs, fallbackWorkingDir); shellErr != nil {
+			return nil, fmt.Errorf("直接启动浏览器失败: %v；Windows Shell 兜底启动失败: %v", directErr, shellErr)
+		}
+		launchTarget = fallbackTarget
+		log.Printf("窗口 %d 直接启动失败，已通过 Windows Shell 成功启动: %v", shortcut.Number, directErr)
+	} else {
+		pid = int32(cmd.Process.Pid)
 	}
 
 	// 等待进程启动
@@ -678,11 +700,39 @@ func (c *ChromeService) launchChromeFromShortcut(shortcut common.ShortcutInfo, s
 		Number:      shortcut.Number,
 		DebugPort:   debugPort,
 		UserDataDir: userDataDir,
-		CommandLine: strings.TrimSpace(shortcut.TargetPath + " " + shortcut.Arguments),
-		PID:         int32(cmd.Process.Pid),
+		CommandLine: strings.TrimSpace(launchTarget + " " + newArgs),
+		PID:         pid,
 	}
 
 	return windowInfo, nil
+}
+
+func (c *ChromeService) resolveBrowserExecutableForFallback(settings *Settings) (string, error) {
+	if settings != nil && settings.ChromePath != "" {
+		if info, err := os.Stat(settings.ChromePath); err == nil && !info.IsDir() {
+			return settings.ChromePath, nil
+		}
+	}
+
+	if c.provider == nil {
+		return "", fmt.Errorf("浏览器提供程序未初始化")
+	}
+
+	browserType := config.BrowserTypeChrome
+	if settings != nil && settings.BrowserType != "" {
+		browserType = settings.BrowserType
+	}
+	browserPath, err := c.provider.FindBrowserPath(browserType)
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(browserPath); err != nil || info.IsDir() {
+		if err != nil {
+			return "", fmt.Errorf("浏览器程序不可访问: %w", err)
+		}
+		return "", fmt.Errorf("浏览器路径不是可执行文件: %s", browserPath)
+	}
+	return browserPath, nil
 }
 
 // extractUserDataDirFromArgs 从参数中提取用户数据目录
@@ -877,6 +927,11 @@ func (c *ChromeService) ImportWindows() ([]syncmanager.WindowInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to find Chrome windows: %v", err)
 	}
+	settings, settingsErr := c.loadSettings()
+	if settingsErr != nil {
+		settings = c.getDefaultSettings()
+	}
+	chromeWindows = c.resolveImportedWindowNumbers(chromeWindows, settings)
 
 	var windowInfos []syncmanager.WindowInfo
 	var mu sync.Mutex
@@ -1185,6 +1240,11 @@ func (c *ChromeService) GetImportedWindows() ([]syncmanager.WindowInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get imported windows: %v", err)
 	}
+	settings, settingsErr := c.loadSettings()
+	if settingsErr != nil {
+		settings = c.getDefaultSettings()
+	}
+	chromeWindows = c.resolveImportedWindowNumbers(chromeWindows, settings)
 
 	var windowInfos []syncmanager.WindowInfo
 	for _, chromeWindow := range chromeWindows {
@@ -1361,6 +1421,7 @@ func (c *ChromeService) ImportWindowsWithIconSettings() ([]syncmanager.WindowInf
 	if err != nil {
 		return nil, fmt.Errorf("failed to find Chrome windows: %v", err)
 	}
+	chromeWindows = c.resolveImportedWindowNumbers(chromeWindows, settings)
 
 	var (
 		windowInfos []syncmanager.WindowInfo
